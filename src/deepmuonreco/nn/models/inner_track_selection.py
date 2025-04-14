@@ -62,8 +62,21 @@ class InnerTrackSelectionTransformer(nn.Module):
         segment_pad_mask: Tensor,
     ) -> Tensor:
         """
+        Args:
+            track: (N, L_trk, D_trk)
+            track_pad_mask: (N, L_trk)
+            segment: (N, L_seg, D_seg)
+            segment_pad_mask: (N, L_seg)
+        Shape:
+            N:batch size
+            L_trk: the max track length in a batch
+            D_trk: track dimension (==len([pt, eta, phi]))
+            L_seg: the max segment length in a batch,
+            D_seg: segment dimension (==6)
         """
+        # track: (N, L_trk, D_trk) -> (N, L_trk, D_model)
         track_embed = self.track_embedder(track)
+        # segment: (N, L_seg, D_seg) -> (N, L_seg, D_model)
         segment_embed = self.segment_embedder(segment)
 
         # compute tgt_mask using track_pad_mask
@@ -78,8 +91,10 @@ class InnerTrackSelectionTransformer(nn.Module):
             num_heads=self.num_heads,
         )
 
+        # latent: tracks in the latent space
+        # latent: (N, L_trk, D_model)
         latent = self.backbone(
-            tgt=track_embed,
+            tgt=track_embed, # target
             memory=segment_embed,
             tgt_mask=tgt_mask,
             memory_mask=memory_mask,
@@ -89,7 +104,9 @@ class InnerTrackSelectionTransformer(nn.Module):
             memory_is_causal=False,
         )
 
+        # latent: (N, L_trk, D_model) -> (N, L_trk, D_output), where D_output==1
         logits: Tensor = self.classification_head(latent)
+        # (N, L_trk, 1) -> (N, L_trk)
         logits = logits.squeeze(dim=2)
 
         logits = logits.masked_fill(mask=track_pad_mask, value=0)
