@@ -121,10 +121,7 @@ def test(
     for batch in data_loader:
         batch = batch.to(device)
 
-        batch = preprocessor(batch)
         batch = model(batch)
-        batch = postprocessor(batch)
-
         loss_batch = criterion(batch)
 
         mask = batch['masks']['track']
