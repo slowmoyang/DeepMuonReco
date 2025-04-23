@@ -22,5 +22,8 @@ class Normalize(nn.Module):
 
 
     def forward(self, input: Tensor) -> Tensor:
+        # Check if input is empty
+        if input.numel() == 0: 
+            return input
         return (input - self.mean) / self.std
 

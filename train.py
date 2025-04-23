@@ -1,10 +1,4 @@
 #!/usr/bin/env python
-"""
-inner track selection task
-
-plan to implement a custom trainer or switch to pytorch_lightning after people
-get familiar with deep learning codes
-"""
 import random
 from typing import Any
 import numpy as np
@@ -19,7 +13,7 @@ from torchmetrics import MetricCollection
 from torchmetrics import MeanMetric
 from torchmetrics.classification import BinaryAUROC, BinaryROC
 import tqdm
-#
+import argparse
 from deepmuonreco.data import InnerTrackSelectionDataset
 from deepmuonreco.nn import Normalize
 from deepmuonreco.nn import InnerTrackSelectionTransformer
@@ -37,24 +31,19 @@ def train(
     logger: Logger,
 ) -> None:
     model.train()
-
     for idx, batch in enumerate(data_loader):
         batch = batch.to(device)
-
         # model inference
         batch = model(batch)
-
         # compute loss
         loss_batch = criterion(batch)
         loss = loss_batch['loss'].mean()
 
-        # backpropagation
         optimizer.zero_grad(set_to_none=True)
         loss.backward()
         optimizer.step()
 
         # log metrics
-        # FIXME:
         if (idx + 1) % 1 == 0:
             logger.track(stage='train', loss=loss)
 
@@ -69,20 +58,12 @@ def validate(
     device: torch.device,
     logger: Logger,
 ) -> dict[str, Any]:
-    """
-    """
     model.eval()
-
     for batch in data_loader:
         batch = batch.to(device)
-
-        # model inference
         batch = model(batch)
-
-        # compute loss
         loss_batch = criterion(batch)
 
-        # compute metrics
         mask = batch['masks']['track']
         preds = batch['score'].masked_select(mask)
         target = batch['target'].long().masked_select(mask)
@@ -93,7 +74,6 @@ def validate(
             target=target,
         )
 
-    # log metrics
     log_dict = {}
     log_dict['loss'] = loss_metric.compute().cpu()
     log_dict['roc_auc'] = roc_metric['auc'].compute().cpu()
@@ -101,7 +81,6 @@ def validate(
 
     loss_metric.reset()
     roc_metric.reset()
-
     return log_dict
 
 @torch.no_grad()
@@ -114,13 +93,9 @@ def test(
     device: torch.device,
     logger: Logger,
 ) -> dict[str, Any]:
-    """
-    """
     model.eval()
-
     for batch in data_loader:
         batch = batch.to(device)
-
         batch = model(batch)
         loss_batch = criterion(batch)
 
@@ -142,38 +117,49 @@ def test(
 
     loss_metric.reset()
     roc_metric.reset()
-
     return log_dict
 
 ###############################################################################
 # hyperparameters
 ###############################################################################
-num_epochs = 100
-device = torch.device('cuda:0')
-train_file_path = './data/sanity-check.root'
-val_file_path = './data/sanity-check.root'
-batch_size = 32
-eval_batch_size = 32
-early_stopping_patience = 10
-seed = 1337
+def parse_args():
+    parser = argparse.ArgumentParser(description="Train DeepMuonReco model with specified hyperparameters.")
+    # Training loop parameters
+    parser.add_argument("--num_epochs", type=int, default=100, help="Number of training epochs")
+    parser.add_argument("--device", type=str, default="cuda:0", help="Device for training (e.g., 'cuda:0' or 'cpu')")
+    parser.add_argument("--train_file_path", type=str, default="./data/sanity-check.root", help="Path to training file")
+    parser.add_argument("--val_file_path", type=str, default="./data/sanity-check.root", help="Path to validation file")
+    parser.add_argument("--batch_size", type=int, default=64, help="Training batch size")
+    parser.add_argument("--eval_batch_size", type=int, default=64, help="Evaluation batch size")
+    parser.add_argument("--early_stopping_patience", type=int, default=10, help="Early stopping patience")
+    parser.add_argument("--seed", type=int, default=1337, help="Random seed")
 
-dim_model = 64
-dim_feedforward = 128
-activation = 'gelu'
-num_heads = 4
-num_layers = 2
-dropout = 0.1
+    # Model architecture parameters
+    parser.add_argument("--dim_model", type=int, default=64, help="Dimension of the model embeddings")
+    parser.add_argument("--dim_feedforward", type=int, default=128, help="Dimension of the feed-forward network")
+    parser.add_argument("--activation", type=str, default="gelu", help="Activation function (e.g., 'gelu', 'relu')")
+    parser.add_argument("--num_heads", type=int, default=8, help="Number of heads for multi-head attention")
+    parser.add_argument("--num_layers", type=int, default=4, help="Number of transformer layers")
+    parser.add_argument("--dropout", type=float, default=0.1, help="Dropout probability")
+
+    # Optimization parameters
+    parser.add_argument("--lr", type=float, default=3e-4, help="Learning rate")
+    parser.add_argument("--weight_decay", type=float, default=1e-1, help="Weight decay coefficient")
+    parser.add_argument("--pos_weight", type=float, default=30, help="Positive weight for BCE loss")
+    return parser.parse_args()
+
+args = parse_args()
 
 # NOTE: see https://pytorch.org/docs/stable/generated/torch.nn.BCEWithLogitsLoss.html
 # TODO: pos_weight must be calculated from dataset with enough statistics
-pos_weight = torch.tensor(30)
+pos_weight = torch.tensor(args.pos_weight)
 
 ###############################################################################
 # for reproducibility
 ###############################################################################
-torch.manual_seed(seed)
-random.seed(seed)
-np.random.seed(seed)
+torch.manual_seed(args.seed)
+random.seed(args.seed)
+np.random.seed(args.seed)
 
 ###############################################################################
 # aim-based logger
@@ -183,14 +169,14 @@ logger = Logger()
 ###############################################################################
 # datasets & data loaders
 ###############################################################################
-train_set = InnerTrackSelectionDataset(path=train_file_path)
-val_set = InnerTrackSelectionDataset(path=val_file_path)
+train_set = InnerTrackSelectionDataset(path=args.train_file_path)
+val_set = InnerTrackSelectionDataset(path=args.val_file_path)
 
 collate_fn = InnerTrackSelectionDataset.collate
 
 train_loader = DataLoader(
     dataset=train_set,
-    batch_size=batch_size,
+    batch_size=args.batch_size,
     shuffle=True,
     drop_last=True,
     collate_fn=collate_fn,
@@ -198,7 +184,7 @@ train_loader = DataLoader(
 
 val_loader = DataLoader(
     dataset=val_set,
-    batch_size=eval_batch_size,
+    batch_size=args.eval_batch_size,
     shuffle=False,
     drop_last=False,
     collate_fn=collate_fn,
@@ -210,7 +196,7 @@ val_loader = DataLoader(
 preprocessor = TensorDictSequential([
     TensorDictModule(
         module=Normalize(
-            mean=[0, 0, 0], # [px, py, pz]
+            mean=[0, 0, 0],  # for track: [px, py, eta]
             std=[100, 100, 3],
         ),
         in_keys=['track'],
@@ -218,29 +204,39 @@ preprocessor = TensorDictSequential([
     ),
     TensorDictModule(
         module=Normalize(
-            mean=[0, 0, 0, 0, 0, 0], # [pox_x, pos_py, pos_z, dir_x, dir_y, dir_z]
+            mean=[0, 0, 0, 0, 0, 0],  # for segment: [pos_x, pos_y, pos_z, dir_x, dir_y, dir_z]
             std=[750, 720, 1000, 1, 1, 1],
         ),
         in_keys=['segment'],
         out_keys=['segment'],
+    ),
+    TensorDictModule(
+        module=Normalize(
+            mean=[0, 0, 0],  # for rechit: [pos_x, pos_y, pos_z]
+            std=[750, 720, 1000],
+        ),
+        in_keys=['rechit'],
+        out_keys=['rechit'],
     ),
 ])
 
 # actual model
 raw_model = TensorDictModule(
     module=InnerTrackSelectionTransformer(
-        dim_model=dim_model,
-        dim_feedforward=dim_feedforward,
-        activation=activation,
-        num_heads=num_heads,
-        num_layers=num_layers,
-        dropout=dropout,
+        dim_model=args.dim_model,
+        dim_feedforward=args.dim_feedforward,
+        activation=args.activation,
+        num_heads=args.num_heads,
+        num_layers=args.num_layers,
+        dropout=args.dropout,
     ),
     in_keys=[
         'track',
         ('pad_masks', 'track'),
         'segment',
         ('pad_masks', 'segment'),
+        'rechit',
+        ('pad_masks', 'rechit'),
     ],
     out_keys=[
         'logits'
@@ -249,7 +245,7 @@ raw_model = TensorDictModule(
 
 raw_model.apply(init_params)
 
-# postprocessing
+# postprocessing: apply Sigmoid activation for score
 postprocessor = TensorDictSequential([
     TensorDictModule(
         module=Sigmoid(),
@@ -258,14 +254,11 @@ postprocessor = TensorDictSequential([
     ),
 ])
 
-
-# model containing preprocessing and postprocessing
 model = TensorDictSequential([
     preprocessor,
     raw_model,
     postprocessor,
 ])
-
 
 ################################################################################
 # loss function & optimizer
@@ -285,8 +278,8 @@ criterion = TensorDictModule(
 
 optimizer = optim.AdamW(
     model.parameters(),
-    lr=3e-4,
-    weight_decay=1e-1,
+    lr=args.lr,
+    weight_decay=args.weight_decay,
 )
 
 ################################################################################
@@ -303,30 +296,31 @@ roc_metric = MetricCollection(
 )
 
 ################################################################################
-# move to gpu
+# logger
 ################################################################################
-model = model.to(device)
-criterion = criterion.to(device)
-preprocessor = preprocessor.to(device)
-postprocessor = postprocessor.to(device)
-loss_metrics = loss_metric.to(device)
-roc_metrics = roc_metric.to(device)
-
-################################################################################
-# summary
-################################################################################
+checkpoint_path = logger.log_dir / 'best_model.pt'
+logger['checkpoint_path'] = str(checkpoint_path)
+logger['hyperparameters'] = vars(args)
 logger['num_params'] = sum(each.numel() for each in model.parameters())
 
 ################################################################################
-# training
+# move to device
+################################################################################
+model = model.to(args.device)
+criterion = criterion.to(args.device)
+preprocessor = preprocessor.to(args.device)
+postprocessor = postprocessor.to(args.device)
+loss_metric = loss_metric.to(args.device)
+roc_metric = roc_metric.to(args.device)
+
+################################################################################
+# training loop
 ################################################################################
 best_val_loss = float('inf')
 best_epoch = -1
-
 early_stopping_wait_count = 0
-checkpoint_path = logger.log_dir / 'best_model.pt'
 
-for epoch in (pbar := tqdm.trange(0, num_epochs + 1, desc='Epoch')):
+for epoch in (pbar := tqdm.trange(0, args.num_epochs + 1, desc='Epoch')):
     logger.epoch = epoch
 
     if epoch >= 1:
@@ -335,7 +329,7 @@ for epoch in (pbar := tqdm.trange(0, num_epochs + 1, desc='Epoch')):
             data_loader=train_loader,
             criterion=criterion,
             optimizer=optimizer,
-            device=device,
+            device=args.device,
             logger=logger,
         )
 
@@ -345,18 +339,18 @@ for epoch in (pbar := tqdm.trange(0, num_epochs + 1, desc='Epoch')):
         criterion=criterion,
         loss_metric=loss_metric,
         roc_metric=roc_metric,
-        device=device,
+        device=args.device,
         logger=logger,
     )
 
-    # check if validation loss is improved
+    # check for improvement
     if val_result['loss'] < best_val_loss:
         best_val_loss = val_result['loss']
         best_epoch = epoch
 
         pbar.set_description(
-            f'epoch={epoch}: loss={val_result["loss"]:.4f}'
-            f' ({best_val_loss=:.4f} @ epoch={best_epoch})'
+            f'epoch={epoch}: loss={val_result["loss"]:.4f} '
+            f'(best_val_loss={best_val_loss:.4f} @ epoch={best_epoch})'
         )
 
         # save checkpoint
@@ -374,7 +368,7 @@ for epoch in (pbar := tqdm.trange(0, num_epochs + 1, desc='Epoch')):
         early_stopping_wait_count = 0
     else:
         early_stopping_wait_count += 1
-        if early_stopping_wait_count >= early_stopping_patience:
+        if early_stopping_wait_count >= args.early_stopping_patience:
             break
 
 ################################################################################
@@ -392,6 +386,6 @@ test_result = test(
     criterion=criterion,
     loss_metric=loss_metric,
     roc_metric=roc_metric,
-    device=device,
+    device=args.device,
     logger=logger,
 )
