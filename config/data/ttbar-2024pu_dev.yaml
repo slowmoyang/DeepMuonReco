@@ -1,0 +1,13 @@
+module:
+  _target_: deepmuonreco.data.InnerTrackSelectionDataModule
+  root: ${paths.data_dir}
+  batch_size: 512
+  train_sampler: null
+
+# metadata
+track_dim: 3
+segment_dim: 6
+rechit_dim: 3
+
+train_set_size: 1000 #  dataset for sanity-check
+pos_weight: 30 # FIXME:

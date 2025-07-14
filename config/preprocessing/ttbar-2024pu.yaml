@@ -1,0 +1,23 @@
+selected_out_keys: null
+modules:
+  - name: track_normalize
+    module:
+      _target_: deepmuonreco.nn.Normalize
+      mean: [0, 0, 0] # [px, py, eta]
+      std: [100, 100, 3]
+    in_keys: [track]
+    out_keys: [track]
+  - name: normalize_segment
+    module:
+      _target_: deepmuonreco.nn.Normalize
+      mean: [0, 0, 0, 0, 0, 0] # [pos_x, pos_y, pos_z, dir_x, dir_y, dir_z]
+      std: [750, 720, 1000, 1, 1, 1]
+    in_keys: [segment]
+    out_keys: [segment]
+  - name: normalize_rechit
+    module:
+      _target_: deepmuonreco.nn.Normalize
+      mean: [0, 0, 0] # [pos_x, pos_y, pos_z]
+      std: [750, 720, 1000]
+    in_keys: [rechit]
+    out_keys: [rechit]

@@ -1,0 +1,21 @@
+train:
+  compute_groups: []
+  metrics: {}
+
+val:
+  compute_groups:
+    - [loss]
+    - [efficiency, accuracy, purity]
+  metrics:
+
+    loss:
+      metric:
+        _target_: torchmetrics.MeanMetric
+      in_keys: [loss]
+
+    edge_rocauc:
+      metric:
+        _target_: torchmetrics.classification.BinaryAUROC
+      in_keys: [edge_score, edge_label]
+
+test: ${.val}

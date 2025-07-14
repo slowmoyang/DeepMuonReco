@@ -1,0 +1,27 @@
+# @package _global_
+
+task_name: ttbar-2024pu
+run_name: ${now:%y-%m-%d-%H-%M-%S}_${slug:2}
+
+defaults:
+  - _self_
+  - paths: ttbar-2024pu_dev
+  - data: ttbar-2024pu_dev
+  - augmentation: none # no augmentation
+  - preprocessing: ttbar-2024pu
+  - model: transformer
+  - postprocessing: default
+  - metric: default
+  - criterion: track_bce
+  - criterion_reduction: mean
+  - optimizer: adamw
+  - lr_scheduler: plateau
+  - trainer: gpu_16-mixed
+  - callbacks: default
+  - debug: null
+  - hydra: default
+
+num_threads: 1
+seed: null # random seed
+tags: []
+description: ""

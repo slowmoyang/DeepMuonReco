@@ -1,0 +1,16 @@
+module:
+  _target_: frog.data.TTto4QTopographsDataModule
+  root: /users/seyang/data/topographs/data/
+  adj_type: full
+  batch_size: 512
+  num_workers: 0
+  pin_memory: false
+  train_sampler:
+    _target_: frog.data.samplers.TensorDictListDatasetSampler
+    _partial_: true
+    key: jet_len
+    boundaries: [5.5, 6.5, 7.5, 8.5, 9.5, 10.5]
+
+# metadata
+train_set_size: 1339875 # matchability == 63
+pos_weight: 2.4615

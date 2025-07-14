@@ -1,0 +1,20 @@
+# no TransformerEncoder
+# TransformerDecoder does not contain self-attention for target array (track here)
+
+module:
+  _target_: deepmuonreco.nn.InnerTrackSelectionTransformer
+
+  track_dim: ${data.track_dim}
+  segment_dim: ${data.segment_dim}
+  rechit_dim: ${data.rechit_dim}
+  output_dim: 1 # binary classification
+
+  model_dim: 128 # latent dimension
+  num_heads: 8 # number of attention heads
+  num_layers: 4 # number of transforme decoder layers
+  dropout_p: 0.1 # dropout rate
+  widening_factor: 4
+
+in_keys: [track, [masks, track], segment, [masks, segment], rechit, [masks, rechit]]
+
+out_keys: [logits]

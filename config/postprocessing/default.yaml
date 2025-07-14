@@ -1,0 +1,7 @@
+selected_out_keys: null
+modules:
+  - name: logits_to_probs
+    module:
+      _target_: torch.nn.Sigmoid
+    in_keys: [logits]
+    out_keys: [score]

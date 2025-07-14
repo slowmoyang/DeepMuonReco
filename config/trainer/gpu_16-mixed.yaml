@@ -1,0 +1,5 @@
+defaults:
+  - default
+  - gpu
+
+precision: 16-mixed

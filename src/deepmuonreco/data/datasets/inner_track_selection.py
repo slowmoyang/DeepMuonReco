@@ -1,11 +1,12 @@
-from typing import cast
+from typing import cast, Any
 import uproot
 import numpy as np
 import awkward as ak
 import torch
+from torch import Tensor
 from torch.utils.data import Dataset
+from torch.nn.utils.rnn import pad_sequence
 from tensordict import TensorDict
-from tensordict import pad_sequence
 
 
 class InnerTrackSelectionDataset(Dataset):
@@ -28,8 +29,10 @@ class InnerTrackSelectionDataset(Dataset):
     DIM_RECHIT = len(RECHIT_FEATURE_LIST)
     DIM_TARGET = 1
 
-    def __init__(self, path):
-        self.example_list = self.process(path)
+    def __init__(self, path, stop: int | None = None, treepath: str = 'muons1stStep/event') -> None:
+        """
+        """
+        self.example_list = self.process(path, treepath=treepath, stop=stop)
 
     def __getitem__(self, index: int) -> TensorDict:
         return self.example_list[index]
@@ -42,10 +45,11 @@ class InnerTrackSelectionDataset(Dataset):
         cls,
         path: str,
         treepath: str = 'muons1stStep/event',
+        stop: int | None = None,
     ) -> list[TensorDict]:
         with uproot.open(path) as file: # type: ignore
             tree = cast(uproot.TTree, file[treepath])
-            chunk = tree.arrays(library='ak')
+            chunk = tree.arrays(library='ak', entry_stop=stop)
 
         track_count = ak.count(chunk.track_pt, axis=1)
         dt_segment_count = ak.count(chunk.dt_segment_direction_x, axis=1)
@@ -119,13 +123,38 @@ class InnerTrackSelectionDataset(Dataset):
 
     @classmethod
     def collate(cls, example_list: list[TensorDict]) -> TensorDict:
-        batch = pad_sequence(example_list, return_mask=True)
-        batch['pad_masks'] = TensorDict(
-            source=dict(
-                track=batch['masks']['track'].logical_not(),
-                segment=batch['masks']['segment'].logical_not(),
-                rechit=batch['masks']['rechit'].logical_not(),
-            ),
-            batch_size=batch.batch_size,
+        """
+        tensordict.pad_sequence is useful but super slow...
+        Thus, I've decided to use torch.nn.utils.rnn.pad_sequence directly.
+        """
+        batch: dict[str, Any] = {
+            key: [example[key] for example in example_list]
+            for key in ['track', 'segment', 'rechit', 'target']
+        }
+        batch['masks'] = {}
+
+
+        device = batch['track'][0].device
+        batch_size = len(example_list)
+
+        for key in ['track', 'segment', 'rechit', 'target']:
+            value: list[Tensor] = batch[key]
+            lengths = torch.tensor(
+                data=[len(each) for each in value],
+                device=device,
+            )
+            batch[key] = pad_sequence(sequences=value, batch_first=True,
+                                    padding_value=0.0)
+
+            max_len = int(lengths.max().item())
+            idx = torch.arange(max_len, device=device).unsqueeze(0).expand(batch_size, max_len)
+            batch['masks'][key] = idx < lengths.unsqueeze(1)
+
+        return TensorDict(
+            source=batch,
+            batch_size=[len(batch['track'])]
         )
-        return batch
+
+
+
+

@@ -6,7 +6,12 @@ dependencies:
   - pytorch-gpu=2.6.0
   - tensordict=0.7.2
   - einops=0.8.1
+  - lightning=2.5.2
   - torchmetrics=1.7.0
+  - optuna=4.4.0
+  - omegaconf
+  - hydra-core=1.3.2
+  - hydra-colorlog
   - aim
   - uproot
   - hist
@@ -15,4 +20,9 @@ dependencies:
   - pandas
   - scikit-learn
   - tqdm
+  - coolname
+  - python-htcondor
   - ipykernel
+  - just
+  - pip:
+    - hydra-optuna-sweeper

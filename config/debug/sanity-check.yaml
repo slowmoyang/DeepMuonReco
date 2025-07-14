@@ -1,0 +1,18 @@
+# @package _global_
+
+defaults:
+  - default
+
+task_name: sanity-check
+
+hydra:
+  job_logging:
+    root:
+      level: DEBUG
+data:
+  module:
+    train_examples: 512
+    val_examples: 512
+    test_examples: 512
+    num_workers: 0
+    pin_memory: false

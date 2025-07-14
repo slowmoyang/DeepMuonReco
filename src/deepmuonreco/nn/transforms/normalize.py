@@ -2,6 +2,11 @@ import torch
 from torch import nn, Tensor
 
 
+__all__ = [
+    'Normalize',
+]
+
+
 class Normalize(nn.Module):
     """torchvision-like Normalize"""
 
@@ -23,7 +28,7 @@ class Normalize(nn.Module):
 
     def forward(self, input: Tensor) -> Tensor:
         # Check if input is empty
-        if input.numel() == 0: 
+        if input.numel() == 0:
             return input
         return (input - self.mean) / self.std
 

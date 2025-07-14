@@ -1,0 +1,10 @@
+module:
+  _target_: deepmuonreco.nn.Mean
+
+in_keys:
+  - loss
+
+out_keys:
+  - loss
+
+inplace: false

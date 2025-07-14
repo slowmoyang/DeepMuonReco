@@ -1,0 +1,9 @@
+# @package _global_
+
+defaults:
+  - default
+
+task_name: test
+
+trainer:
+  max_epochs: 10

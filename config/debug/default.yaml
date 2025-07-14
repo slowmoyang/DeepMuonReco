@@ -1,0 +1,18 @@
+# @package _global_
+
+task_name: "debug"
+
+trainer:
+  max_epochs: 1
+  devices: 1
+  deterministic: false
+  benchmark: true
+  detect_anomaly: true
+  enable_progress_bar: true
+  log_every_n_steps: 1
+
+  profiler:
+    _target_: lightning.pytorch.profilers.SimpleProfiler
+    dirpath: ${paths.output_dir}/profile
+    filename: profile
+    extended: true

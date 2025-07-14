@@ -1,0 +1,23 @@
+train:
+  compute_groups: []
+  metrics: {}
+
+val:
+  compute_groups:
+    - [loss]
+  metrics:
+    loss:
+      metric:
+        _target_: torchmetrics.MeanMetric
+      in_keys: [loss]
+    auroc:
+      metric:
+        _target_: deepmuonreco.metrics.MaskingWrapper
+        metric:
+          _target_: torchmetrics.classification.BinaryAUROC
+      in_keys:
+        - [masks, track] # data mask
+        - logits
+        - target
+
+test: ${.val}

@@ -1,0 +1,39 @@
+_target_: lightning.pytorch.trainer.Trainer
+_partial_: true # callbacks
+
+accelerator: cpu
+strategy: auto
+devices: 1
+
+precision: null
+
+min_epochs: 1
+max_epochs: 100000
+
+max_time: 00:40:00:00 # DD:HH:MM:SS
+
+log_every_n_steps: 100
+enable_progress_bar: false
+
+accumulate_grad_batches: 1 # no gradient accumulation
+
+gradient_clip_val: 5
+gradient_clip_algorithm: norm
+
+deterministic: false
+benchmark: true
+inference_mode: true
+detect_anomaly: false
+
+default_root_dir: ${paths.output_dir}
+
+logger:
+  _target_: aim.pytorch_lightning.AimLogger
+  repo: ${paths.log_dir}
+  experiment: ${task_name}
+  context_prefixes:
+    subset:
+      train: train_
+      validate: validate_
+      test: test_
+      predict: predict_

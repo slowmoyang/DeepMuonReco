@@ -1,0 +1,8 @@
+model_checkpoint:
+  _target_: lightning.pytorch.callbacks.ModelCheckpoint
+  dirpath: ${paths.output_dir}/checkpoints
+  monitor: validate_loss
+  mode: min
+  save_last: true
+  filename: epoch={epoch:06d}_validate-loss={validate_loss:.6f}
+  auto_insert_metric_name: false
