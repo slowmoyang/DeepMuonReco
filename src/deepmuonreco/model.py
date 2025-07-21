@@ -30,6 +30,7 @@ class Model(LightningModule):
         augmentation: TensorDictSequential,
         preprocessing: TensorDictSequential,
         postprocessing: TensorDictSequential,
+        pre_metric_postprocessing: TensorDictSequential,
         model: TensorDictModule,
         criterion: TensorDictModule,
         criterion_reduction: TensorDictModule,
@@ -47,12 +48,14 @@ class Model(LightningModule):
         self.model = model
         self.criterion = criterion
         self.criterion_reduction = criterion_reduction
+        self.pre_metric_postprocessing = pre_metric_postprocessing
         self.train_metrics = train_metrics
         self.val_metrics = val_metrics
         self.test_metrics = test_metrics
         self._optimizer_config = optimizer_config
         self._lr_scheduler_config = lr_scheduler_config
-        # self._lr = None
+
+        self.lr = optimizer_config.lr
 
     @classmethod
     def from_config(cls, config: DictConfig):
@@ -62,6 +65,7 @@ class Model(LightningModule):
         model = build_tensordictmodule(config.model)
         criterion = build_tensordictmodule(config.criterion)
         criterion_reduction = build_tensordictmodule(config.criterion_reduction)
+        pre_metric_postprocessing = build_tensordictsequential(config.pre_metric_postprocessing)
         train_metrics = build_metric_collection(config=config.metric.train, stage=RunningStage.TRAINING)
         val_metrics = build_metric_collection(config=config.metric.val, stage=RunningStage.VALIDATING)
         test_metrics = build_metric_collection(config=config.metric.test, stage=RunningStage.TESTING)
@@ -75,6 +79,7 @@ class Model(LightningModule):
             model=model,
             criterion=criterion,
             criterion_reduction=criterion_reduction,
+            pre_metric_postprocessing=pre_metric_postprocessing,
             train_metrics=train_metrics,
             val_metrics=val_metrics,
             test_metrics=test_metrics,
@@ -88,24 +93,23 @@ class Model(LightningModule):
         with torch.no_grad():
             batch = self.preprocessing(batch)
         batch = self.model(batch)
-        batch = self.criterion(batch)
         return batch
 
     def training_step(self, batch: TensorDict) -> Tensor:
         with torch.no_grad():
             batch = self.augmentation(batch)
         batch = self(batch)
+        batch = self.criterion(batch)
         loss = self.criterion_reduction(batch)['loss']
         self.train_metrics.update(batch)
         self.log(name=f'{RunningStage.TRAINING.value}_loss', value=loss)
         return loss
 
     def _eval_step(self, batch: TensorDict, metrics: MetricCollection) -> TensorDict:
-        print(f'{batch=}')
         batch = self(batch)
-        print(f'{batch=}')
+        batch = self.criterion(batch)
         batch = self.postprocessing(batch)
-        print(f'{batch=}')
+        batch = self.pre_metric_postprocessing(batch)
         metrics.update(batch)
         return batch
 
@@ -173,6 +177,7 @@ class Model(LightningModule):
 
         optimizer = config.optimizer(
             params=params,
+            lr=self.lr,
         )
         return optimizer
 

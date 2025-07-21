@@ -11,6 +11,7 @@ defaults:
   - preprocessing: ttbar-2024pu
   - model: transformer
   - postprocessing: default
+  - pre_metric_postprocessing: none
   - metric: default
   - criterion: track_bce
   - criterion_reduction: mean
