@@ -1,0 +1,8 @@
+module:
+  _target_: deepmuonreco.nn.MaskedMean
+in_keys:
+  - [masks, track] # mask
+  - loss # input
+out_keys:
+  - loss
+inplace: false

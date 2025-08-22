@@ -1,0 +1,25 @@
+# @package _global_
+
+defaults:
+  - _self_
+
+  - exp: default
+  - paths: default
+  - logger: default
+  - data: default
+  - preprocessing: default
+  - model: transformer
+  - postprocessing: default
+  - criterion: bce
+  - criterion_reduction: masked_mean
+  - optimizer: adamw
+  - fit: default
+  - metric: default
+  - hydra: default
+  - debug: null
+
+seed: 1337
+device: cuda:0
+num_threads: 1
+num_interop_threads: 1
+run: ${now:%y-%m-%d-%H-%M-%S}_${slug:2}

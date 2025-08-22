@@ -1,0 +1,19 @@
+module:
+  _target_: deepmuonreco.nn.InnerTrackSelectionTransformer
+  dim_model: 64 # Dimension of the model embeddings
+  dim_feedforward: 128 # Dimension of the feed-forward network
+  activation: gelu # Activation function (e.g., 'gelu', 'relu')
+  num_heads: 8 # Number of heads for multi-head attention
+  num_layers: 4 # Number of transformer layers
+  dropout: 0.1 # Dropout probability
+
+in_keys:
+  - track
+  - [pad_masks, track]
+  - segment
+  - [pad_masks, segment]
+  - rechit
+  - [pad_masks, rechit]
+
+out_keys:
+  - logits

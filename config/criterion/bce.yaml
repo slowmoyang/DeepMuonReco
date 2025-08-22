@@ -1,0 +1,12 @@
+module:
+  _target_: torch.nn.BCEWithLogitsLoss
+  pos_weight:
+    _target_: torch.Tensor
+    data:
+      - ${exp.pos_weight}
+  reduction: none
+in_keys:
+  - logits
+  - target
+out_keys:
+  - loss

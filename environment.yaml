@@ -16,3 +16,6 @@ dependencies:
   - scikit-learn
   - tqdm
   - ipykernel
+  - hydra-core=1.3.2
+  - hydra-colorlog
+  - coolname

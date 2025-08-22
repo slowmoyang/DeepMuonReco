@@ -28,8 +28,8 @@ class InnerTrackSelectionDataset(Dataset):
     DIM_RECHIT = len(RECHIT_FEATURE_LIST)
     DIM_TARGET = 1
 
-    def __init__(self, path):
-        self.example_list = self.process(path)
+    def __init__(self, path: str, max_events: int | float | None = None):
+        self.example_list = self.process(path, max_events=max_events)
 
     def __getitem__(self, index: int) -> TensorDict:
         return self.example_list[index]
@@ -41,11 +41,30 @@ class InnerTrackSelectionDataset(Dataset):
     def process(
         cls,
         path: str,
+        max_events: int | float | None = None,
         treepath: str = 'muons1stStep/event',
     ) -> list[TensorDict]:
-        with uproot.open(path) as file: # type: ignore
-            tree = cast(uproot.TTree, file[treepath])
-            chunk = tree.arrays(library='ak')
+        with uproot.open(path) as file:
+            tree = file[treepath]
+
+            total = tree.num_entries
+
+            if max_events is None:
+                entry_stop = None
+            elif isinstance(max_events, int):
+                if max_events < 0:
+                    raise ValueError("max_events must be a non-negative integer or None.")
+                entry_stop = min(max_events, total)
+            elif isinstance(max_events, float):
+                if not (0.0 < max_events <= 1.0):
+                    raise ValueError("max_events must be a float in the range (0, 1].")
+                entry_stop = int(total * max_events)
+                if entry_stop < 1:
+                    raise ValueError("max_events results in an empty dataset.")
+            else:
+                raise TypeError("max_events must be an int, float, or None.")
+
+            chunk = tree.arrays(library='ak', entry_stop=entry_stop)
 
         track_count = ak.count(chunk.track_pt, axis=1)
         dt_segment_count = ak.count(chunk.dt_segment_direction_x, axis=1)

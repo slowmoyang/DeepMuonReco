@@ -1,0 +1,65 @@
+val:
+  postprocessing:
+    modules: []
+
+  metric:
+    metrics:
+
+      loss:
+        metric:
+          _target_: deepmuonreco.metrics.MaskingWrapper
+          metric:
+            _target_: torchmetrics.MeanMetric
+            compute_on_cpu: true
+        in_keys:
+          - [masks, track] # mask
+          - loss
+
+      roc_auc:
+        metric:
+          _target_: deepmuonreco.metrics.MaskingWrapper
+          metric:
+            _target_: torchmetrics.classification.BinaryAUROC
+            compute_on_cpu: true
+        in_keys:
+          - [masks, track] # mask
+          - score
+          - target
+
+################################################################################
+#
+################################################################################
+test:
+
+  postprocessing:
+    modules:
+      - name: target_to_long
+        module:
+          _target_: deepmuonreco.nn.ToDtype
+          dtype: long
+
+        in_keys:
+          - target
+        out_keys:
+          - target_long
+
+  metric:
+    compute_groups:
+      - loss
+      - [roc_auc, roc_curve]
+
+    metrics:
+      loss: ${metric.val.metric.metrics.loss}
+
+      roc_auc: ${metric.val.metric.metrics.roc_auc}
+
+      roc_curve:
+        metric:
+          _target_: deepmuonreco.metrics.MaskingWrapper
+          metric:
+            _target_: torchmetrics.classification.BinaryROC
+            compute_on_cpu: true
+        in_keys:
+          - [masks, track] # mask
+          - score
+          - target_long

@@ -1,0 +1,12 @@
+# @package _global_
+
+fit:
+  num_epochs: 2
+
+data:
+  train_set:
+    max_events: ${eval:'2 * ${data.batch_size}'}
+  val_set:
+    max_events: ${eval:'2 * ${data.eval_batch_size}'}
+  test_set:
+    max_events: ${eval:'2 * ${data.eval_batch_size}'}

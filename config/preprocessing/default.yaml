@@ -1,0 +1,31 @@
+modules:
+  - name: track_norm
+    module:
+      _target_: deepmuonreco.nn.Normalize
+      offset: [0, 0, 0]
+      scale: [100, 100, 3]
+    in_keys:
+      - track
+    out_keys:
+      - track_prep
+
+  - name: segment_norm
+    module:
+      _target_: deepmuonreco.nn.Normalize
+      offset: [0, 0, 0, 0, 0, 0] # for segment: [pos_x, pos_y, pos_z, dir_x, dir_y, dir_z]
+      scale: [750, 720, 1000, 1, 1, 1]
+    in_keys:
+      - segment
+    out_keys:
+      - segment_prep
+
+
+  - name: rechit_norm
+    module:
+      _target_: deepmuonreco.nn.Normalize
+      offset: [0, 0, 0] # for rechit: [pos_x, pos_y, pos_z]
+      scale: [750, 720, 1000]
+    in_keys:
+      - rechit
+    out_keys:
+      - rechit_prep

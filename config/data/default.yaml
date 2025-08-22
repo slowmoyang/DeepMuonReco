@@ -1,0 +1,35 @@
+batch_size: 64
+eval_batch_size: 64
+
+train_set:
+  _target_: deepmuonreco.data.InnerTrackSelectionDataset
+  path: /users/seyang/data/deepmuonreco/train.root
+  max_events: null # use all events
+
+val_set:
+  _target_: deepmuonreco.data.InnerTrackSelectionDataset
+  path: /users/seyang/data/deepmuonreco/val.root
+  max_events: null # use all events
+
+test_set:
+  _target_: deepmuonreco.data.InnerTrackSelectionDataset
+  path: /users/seyang/data/deepmuonreco/val.root
+  max_events: null # use all events
+
+train_loader:
+  _target_: torch.utils.data.DataLoader
+  _partial_: true # dataset, collate
+  batch_size: ${data.batch_size}
+  shuffle: true
+  drop_last: true
+  num_workers: 0
+
+val_loader:
+  _target_: torch.utils.data.DataLoader
+  _partial_: true # dataset, collate
+  batch_size: ${data.eval_batch_size}
+  shuffle: false
+  drop_last: false
+  num_workers: 0
+
+test_loader: ${data.val_loader}
