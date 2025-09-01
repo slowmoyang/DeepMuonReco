@@ -276,7 +276,7 @@ def main(config: DictConfig) -> None:
             )
         else:
             early_stopping_wait_count += 1
-            # log earlying stoping status with count
+            # log early stopping status with count
             _logger.debug(
                 f'[EarlyStopping] {early_stopping_wait_count=} '
                 f'with {best_val_loss=:.4f} at {best_epoch=}'
