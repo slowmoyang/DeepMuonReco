@@ -2,10 +2,6 @@ import torch
 import torch.nn as nn
 from torch import Tensor
 
-
-
-
-
 class ToDtype(nn.Module):
 
     dtype_map = {
