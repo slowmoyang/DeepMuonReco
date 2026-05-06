@@ -265,13 +265,11 @@ def run(
     run_dir = Path(config.paths.run_dir)
 
     memory_tracker = MemoryTracker(
-        aim_run=aim_run,
         output_dir=run_dir,
     )
 
     cuda_memory_tracker = CUDAMemoryTracker(
         device=torch.device(config.torch.device),
-        aim_run=aim_run,
         output_dir=run_dir,
     )
 

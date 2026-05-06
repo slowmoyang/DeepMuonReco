@@ -15,10 +15,8 @@ class MemoryTracker:
 
     def __init__(
         self,
-        aim_run: aim.Run,
         output_dir: Path | None = None,
     ) -> None:
-        self.aim_run = aim_run
         self.output_dir = output_dir
 
         self.process = psutil.Process(os.getpid())
@@ -39,13 +37,6 @@ class MemoryTracker:
 
         self.log.append((tag, mem))
 
-        # self.aim_run.track(
-        #     value=mem,
-        #     name="memory_usage_gb",
-        #     step=self.aim_run.step,
-        #     epoch=self.aim_run.epoch,
-        #     context={"tag": tag},
-        # )
         self.logger.info(f"{tag}: {humanize.naturalsize(mem, binary=True)}")
 
     def write(self, path: Path):
@@ -60,11 +51,9 @@ class CUDAMemoryTracker:
     def __init__(
         self,
         device: torch.device,
-        aim_run: aim.Run,
         output_dir: Path,
     ):
         self.device = device
-        self.aim_run = aim_run
         self.output_dir = output_dir
 
         self.logger = logging.getLogger(self.__class__.__name__)
@@ -91,14 +80,6 @@ class CUDAMemoryTracker:
         max_mem = torch.cuda.max_memory_allocated(device=self.device)
 
         self.log.append((tag, mem, max_mem))
-
-        # self.aim_run.track(
-        #     value=mem,
-        #     name="cuda_memory_usage_gb",
-        #     step=self.aim_run.step,
-        #     epoch=self.aim_run.epoch,
-        #     context={"tag": tag},
-        # )
 
         self.logger.info(
             f"{tag}: {humanize.naturalsize(mem, binary=True)} "
