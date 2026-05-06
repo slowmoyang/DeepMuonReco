@@ -5,16 +5,12 @@ import warnings
 import os
 from typing import Any
 from contextlib import nullcontext
-from socket import gethostname
-from getpass import getuser
-from datetime import datetime
 import secrets
 
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
 from torch.nn.utils import clip_grad_norm_
-from torch.optim import Optimizer, lr_scheduler
+from torch.optim import Optimizer
 from torch.optim import AdamW
 from torch.optim.lr_scheduler import LinearLR
 from torch.optim.lr_scheduler import CosineAnnealingLR
@@ -25,6 +21,8 @@ from tensordict.nn import TensorDictModule
 
 from torchmetrics.aggregation import MeanMetric
 from torchmetrics.classification import BinaryAUROC
+
+import torchinfo
 
 import hydra
 from hydra.utils import instantiate
@@ -40,7 +38,6 @@ from tqdm import TqdmExperimentalWarning
 
 from hist import Hist
 
-import matplotlib as mpl
 import matplotlib.pyplot as plt
 import mplhep as mh
 
@@ -53,9 +50,6 @@ mh.style.use("CMS")
 
 # FIXME: better way to set project root for hydra
 os.environ["PROJECT_ROOT"] = str(Path(__file__).parents[1].resolve())
-
-# FIXME:
-PRIMARY_JET_LABEL = 1
 
 _logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
@@ -85,15 +79,38 @@ OmegaConf.register_new_resolver(
 )
 
 
-@dataclass
+@dataclass(repr=True)
 class GlobalState:
     """Class to hold global state information such as current step and epoch."""
 
     step: int = 0
     epoch: int = 0
+    val_loss: float = float("inf")
+    val_auroc: float = 0.0
+    best_epoch: int = 0
+    best_val_loss: float = float("inf")
+    best_val_auroc: float = 0.0
 
     def state_dict(self):
         return asdict(self)
+
+    def update_epoch(self, loss: float, auroc: float):
+        """Update the best loss and AUROC if the current values are better."""
+        self.val_loss = loss
+        self.val_auroc = auroc
+
+        if loss < self.best_val_loss:
+            self.best_epoch = self.epoch
+            self.best_val_loss = loss
+            self.best_val_auroc = auroc
+
+
+    def __str__(self):
+        return (
+            f"Epoch: {self.epoch}, Step: {self.step}, "
+            f"Val Loss: {self.val_loss:.4f}, Val AUROC: {self.val_auroc:.4f} "
+            f"(Best Epoch: {self.best_epoch}, Val Loss: {self.best_val_loss:.4f}, Val AUROC: {self.best_val_auroc:.4f})"
+        )
 
 
 def train(
@@ -165,6 +182,8 @@ def validate(
 
     loss_metric = MeanMetric().to(device)
     auroc_metric = BinaryAUROC().to(device)
+    h_sig = Hist.new.Reg(40, 0, 1).Double()
+    h_bkg = h_sig.copy()
 
     progress_bar = tqdm.rich.tqdm(
         data_loader,
@@ -184,12 +203,21 @@ def validate(
             preds = logits.sigmoid()
             loss = criterion(input=logits, target=target)
 
-            loss_metric.update(loss)
-            auroc_metric.update(preds=preds, target=target)
+        loss_metric.update(loss)
+        auroc_metric.update(preds=preds, target=target)
+        h_sig.fill(preds[target == 1].cpu().float().numpy())
+        h_bkg.fill(preds[target == 0].cpu().float().numpy())
 
     result = {}
     result["loss"] = loss_metric.compute().item()
     result["auroc"] = auroc_metric.compute().item()
+
+    fig, ax = plt.subplots()
+    h_bkg.plot(ax=ax, label="background", histtype="step", color="tab:blue")
+    h_sig.plot(ax=ax, label="signal", histtype="step", color="tab:orange")
+    ax.set_xlabel("Score")
+    ax.set_ylabel("Count")
+    result['dist_score'] = Image(fig)
 
     return result
 
@@ -266,22 +294,32 @@ def run(aim_run: aim.Run, config: DictConfig):
     # Instantiate model
     # ---------------------------------------------------------------------------
     raw_model = instantiate(config.model)
-    _logger.info(f"{raw_model=}")
 
-    in_key_list = [
-        "tracker_track",
-        "tracker_track_data_mask",
-        "dt_segment",
-        "dt_segment_data_mask",
-        "csc_segment",
-        "csc_segment_data_mask",
-        "gem_segment",
-        "gem_segment_data_mask",
-        "rpc_hit",
-        "rpc_hit_data_mask",
-        "gem_hit",
-        "gem_hit_data_mask",
-    ]
+    # summarize model
+    model_statistics = torchinfo.summary(model=raw_model, verbose=False)
+    _logger.info(f"Model summary:\n{model_statistics}")
+
+    with open(run_dir / "model_summary.txt", "w") as file:
+        file.write(f"{model_statistics}")
+        file.write("\n\n")
+        file.write(f"Model architecture:\n{raw_model}")
+
+    # ---------------------------------------------------------------------------
+    #
+    # ---------------------------------------------------------------------------
+    in_key_list = []
+    if config.data.tracker_track:
+        in_key_list += ["tracker_track", "tracker_track_data_mask"]
+    if config.data.dt_segment:
+        in_key_list += ["dt_segment", "dt_segment_data_mask"]
+    if config.data.csc_segment:
+        in_key_list += ["csc_segment", "csc_segment_data_mask"]
+    if config.data.gem_segment:
+        in_key_list += ["gem_segment", "gem_segment_data_mask"]
+    if config.data.rpc_hit:
+        in_key_list += ["rpc_hit", "rpc_hit_data_mask"]
+    if config.data.gem_hit:
+        in_key_list += ["gem_hit", "gem_hit_data_mask"]
 
     in_keys = {each: each for each in in_key_list}
 
@@ -292,6 +330,14 @@ def run(aim_run: aim.Run, config: DictConfig):
             "logits",
         ],
     )
+
+    # ---------------------------------------------------------------------------
+    #
+    # ---------------------------------------------------------------------------
+    if config.torch.compile:
+        _logger.info("Compiling model with torch.compile...")
+        model = torch.compile(model, mode="reduce-overhead")
+        _logger.info("Model compilation completed.")
 
     # ---------------------------------------------------------------------------
     # Dataset
@@ -384,8 +430,6 @@ def run(aim_run: aim.Run, config: DictConfig):
     # ---------------------------------------------------------------------------
     # GPU setup
     # ---------------------------------------------------------------------------
-    # torch.autograd.set_detect_anomaly(True) # TODO: switch to this for debugging
-
     _logger.info("Moving model and criterion to device...")
 
     model = model.to(device)
@@ -404,7 +448,7 @@ def run(aim_run: aim.Run, config: DictConfig):
         raise ValueError(f"Unsupported precision: {config.torch.precision}")
 
     # ---------------------------------------------------------------------------
-    #
+    # Global state setup
     # ---------------------------------------------------------------------------
     global_state = GlobalState()
 
@@ -415,7 +459,7 @@ def run(aim_run: aim.Run, config: DictConfig):
 
     model_checkpoint = ModelCheckpoint(
         object_dict={
-            "model": model,
+            "model": raw_model,
             "optimizer": optimizer,
             "lr_scheduler": lr_scheduler,
             "global_state": global_state,
@@ -431,6 +475,7 @@ def run(aim_run: aim.Run, config: DictConfig):
 
     for epoch in tqdm.rich.trange(0, 1 + config.optim.max_epochs, desc="Epoch"):
         global_state.epoch = epoch
+
         if epoch >= 1:
             train(
                 model=model,
@@ -466,7 +511,12 @@ def run(aim_run: aim.Run, config: DictConfig):
             )
         plt.close("all")
 
-        _logger.info(f"Epoch {epoch}: {val_result=}")
+        global_state.update_epoch(
+            loss=val_result["loss"],
+            auroc=val_result["auroc"],
+        )
+
+        _logger.info(global_state)
 
         model_checkpoint.step(metric=val_result)
 
@@ -475,7 +525,7 @@ def run(aim_run: aim.Run, config: DictConfig):
     ############################################################################
 
     best_checkpoint = torch.load(model_checkpoint.best_path)
-    model.load_state_dict(best_checkpoint["model"])
+    raw_model.load_state_dict(best_checkpoint["model"])
     del best_checkpoint
 
     # final evaluation on the validation set using the best model checkpoint
@@ -496,7 +546,8 @@ def main(config: DictConfig):
     )
 
     try:
-        run(aim_run=aim_run, config=config)
+        with torch.autograd.set_detect_anomaly(mode=config.torch.detect_anomaly, check_nan=config.torch.check_nan):
+            run(aim_run=aim_run, config=config)
     except Exception as error:
         _logger.exception(f"An error occurred during training: {error}")
         _logger.info("Closing Aim run due to error.")

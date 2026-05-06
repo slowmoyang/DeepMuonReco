@@ -4,3 +4,6 @@ float32_matmul_precision: high
 device: cuda:0
 precision: bfloat16
 seed: ${randbits:}
+compile: false
+detect_anomaly: false
+check_nan: true # applied when detect_anomaly is true

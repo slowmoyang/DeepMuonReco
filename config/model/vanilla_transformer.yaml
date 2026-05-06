@@ -9,7 +9,7 @@ rpc_hit_dim: ${data.rpc_hit.dim}
 gem_hit_dim: ${data.gem_hit.dim}
 
 # Output dimension
-output_dim: ${exp.target_dim}
+output_dim: 1 # FIXME:
 
 model_dim: 64 # Dimension of the model embeddings
 feedforward_dim: 256 # Dimension of the feed-forward network

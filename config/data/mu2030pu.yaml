@@ -3,6 +3,7 @@
 target_key: track_is_trk_muon
 
 tracker_track:
+  enabled: true
   features: [px, py, pz, vx, vy, vz, charge]
   dim: ${len:${.features}}
   preprocessing:
@@ -13,6 +14,7 @@ tracker_track:
     input_max: [13.967, 12.497, 14.909, 5.152, 3.461, 5.638, 1.000]
 
 dt_segment:
+  enabled: true
   features: [pos_x, pos_y, pos_z, dir_x, dir_y, dir_z]
   dim: ${len:${.features}}
   preprocessing:
@@ -21,6 +23,7 @@ dt_segment:
     input_max: [779.118, 720.495, 652.156, 1.000, 1.000, 0.958]
 
 csc_segment:
+  enabled: true
   features: [pos_x, pos_y, pos_z, dir_x, dir_y, dir_z]
   dim: ${len:${.features}}
   preprocessing:
@@ -29,6 +32,7 @@ csc_segment:
     input_max: [685.690, 685.244, 1037.743, 0.998, 0.999, 1.000]
 
 gem_segment:
+  enabled: true
   features: [pos_x, pos_y, pos_z, dir_x, dir_y, dir_z]
   dim: ${len:${.features}}
   preprocessing:
@@ -37,6 +41,7 @@ gem_segment:
     input_max: [142.960, 144.926, 538.790, 0.831, 0.838, 1.000]
 
 rpc_hit:
+  enabled: true
   features: [pos_x, pos_y, pos_z]
   dim: ${len:${.features}}
   preprocessing:
@@ -45,6 +50,7 @@ rpc_hit:
     input_max: [754.477, 704.550, 1066.155]
 
 gem_hit:
+  enabled: true
   features: [pos_x, pos_y, pos_z]
   dim: ${len:${.features}}
   preprocessing:

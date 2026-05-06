@@ -119,9 +119,14 @@ class LatentAttentionModel(nn.Module):
         )
 
         # tracker track-wise regression head
-        self.head = nn.Linear(
-            in_features=model_dim,
-            out_features=output_dim,
+        self.head = nn.Sequential(
+            nn.LayerNorm(
+                normalized_shape=model_dim,
+            ),
+            nn.Linear(
+                in_features=model_dim,
+                out_features=output_dim,
+            ),
         )
 
     def forward(
