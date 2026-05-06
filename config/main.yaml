@@ -1,0 +1,18 @@
+# @package _global_
+
+defaults:
+  - model: latent_attention
+  - data: mu2030pu
+  - dataset: default
+  - data_loader: default
+  - preprocessing: default
+  - optim: default
+  - paths: khu
+  - torch: default
+  - hydra: default
+  - misc: default
+  - _self_
+  - mode: null
+
+exp: tracker_track_selection
+run: ${now:%y%m%d-%H%M%S}_${slug:2}

@@ -1,9 +1,0 @@
-_target_: aim.pytorch_lightning.AimLogger
-repo: ${paths.log_dir}
-experiment: ${exp.name}
-context_prefixes:
-  subset:
-    train: train_
-    validate: val_
-    test: test_
-    predict: predict_

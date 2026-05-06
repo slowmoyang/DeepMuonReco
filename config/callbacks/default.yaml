@@ -1,6 +1,0 @@
-defaults:
-  - model_checkpoint
-  - rich_model_summary
-  - learning_rate_monitor
-  - cuda_memory_summary
-  - _self_

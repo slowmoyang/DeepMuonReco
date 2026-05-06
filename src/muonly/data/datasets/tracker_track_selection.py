@@ -1,5 +1,5 @@
 from pathlib import Path
-from logging import getLogger
+import logging
 from typing import Self
 import h5py as h5
 import numpy as np
@@ -8,7 +8,7 @@ from torch.utils.data import Dataset
 from torch.nn.utils.rnn import pad_sequence
 from tensordict import TensorDict
 import tqdm.rich
-from ..utils import Compose
+from ..transforms import Compose
 
 
 __all__ = [
@@ -16,7 +16,7 @@ __all__ = [
 ]
 
 
-_logger = getLogger(__name__)
+_logger = logging.getLogger(__name__)
 
 
 def _stack_features(feature_list: list[np.ndarray]) -> list[torch.Tensor]:
@@ -30,24 +30,24 @@ class TrackerTrackSelectionDataset(Dataset):
     def __init__(
         self,
         path: str | Path,
-        tracker_track_feature_list: list[str],
-        dt_segment_feature_list: list[str],
-        csc_segment_feature_list: list[str],
-        gem_segment_feature_list: list[str] | None,
-        rpc_hit_feature_list: list[str] | None,
-        gem_hit_feature_list: list[str] | None,
+        tracker_track_features: list[str],
+        dt_segment_features: list[str],
+        csc_segment_features: list[str],
+        gem_segment_features: list[str] | None,
+        rpc_hit_features: list[str] | None,
+        gem_hit_features: list[str] | None,
         target_key: str = "track_is_trk_muon",
         max_events: int | float | None = None,
     ) -> None:
         super().__init__()
 
         _logger.info(f"Loading data from {path} ...")
-        _logger.info(f"  - Tracker track features: {tracker_track_feature_list}")
-        _logger.info(f"  - DT segment features: {dt_segment_feature_list}")
-        _logger.info(f"  - CSC segment features: {csc_segment_feature_list}")
-        _logger.info(f"  - GEM segment features: {gem_segment_feature_list}")
-        _logger.info(f"  - RPC hit features: {rpc_hit_feature_list}")
-        _logger.info(f"  - GEM hit features: {gem_hit_feature_list}")
+        _logger.info(f"  - Tracker track features: {tracker_track_features}")
+        _logger.info(f"  - DT segment features: {dt_segment_features}")
+        _logger.info(f"  - CSC segment features: {csc_segment_features}")
+        _logger.info(f"  - GEM segment features: {gem_segment_features}")
+        _logger.info(f"  - RPC hit features: {rpc_hit_features}")
+        _logger.info(f"  - GEM hit features: {gem_hit_features}")
         _logger.info(f"  - Target: {target_key}")
 
         path = Path(path)
@@ -64,12 +64,12 @@ class TrackerTrackSelectionDataset(Dataset):
         _logger.info(f"Loading examples from {path} ...")
         self.example_list = loader(
             path=path,
-            tracker_track_feature_list=tracker_track_feature_list,
-            dt_segment_feature_list=dt_segment_feature_list,
-            csc_segment_feature_list=csc_segment_feature_list,
-            gem_segment_feature_list=gem_segment_feature_list,
-            rpc_hit_feature_list=rpc_hit_feature_list,
-            gem_hit_feature_list=gem_hit_feature_list,
+            tracker_track_features=tracker_track_features,
+            dt_segment_features=dt_segment_features,
+            csc_segment_features=csc_segment_features,
+            gem_segment_features=gem_segment_features,
+            rpc_hit_features=rpc_hit_features,
+            gem_hit_features=gem_hit_features,
             target_key=target_key,
             max_events=max_events,
         )
@@ -104,12 +104,12 @@ class TrackerTrackSelectionDataset(Dataset):
     def from_root(
         cls,
         path: str | Path,
-        tracker_track_feature_list: list[str],
-        dt_segment_feature_list: list[str],
-        csc_segment_feature_list: list[str],
-        gem_segment_feature_list: list[str] | None,
-        rpc_hit_feature_list: list[str] | None,
-        gem_hit_feature_list: list[str] | None,
+        tracker_track_features: list[str],
+        dt_segment_features: list[str],
+        csc_segment_features: list[str],
+        gem_segment_features: list[str] | None,
+        rpc_hit_features: list[str] | None,
+        gem_hit_features: list[str] | None,
         max_events: int | float | None,
         target_key: str = "track_is_trk_muon",
         treepath: str = "deepMuonRecoNtuplizer/tree",
@@ -121,12 +121,12 @@ class TrackerTrackSelectionDataset(Dataset):
         cls,
         path: str | Path,
         max_events: int | float | None,
-        tracker_track_feature_list: list[str],
-        dt_segment_feature_list: list[str],
-        csc_segment_feature_list: list[str],
-        gem_segment_feature_list: list[str] | None,
-        rpc_hit_feature_list: list[str] | None,
-        gem_hit_feature_list: list[str] | None,
+        tracker_track_features: list[str],
+        dt_segment_features: list[str],
+        csc_segment_features: list[str],
+        gem_segment_features: list[str] | None,
+        rpc_hit_features: list[str] | None,
+        gem_hit_features: list[str] | None,
         target_key: str = "track_is_trk_muon",
     ) -> list[TensorDict]:
         """
@@ -145,37 +145,37 @@ class TrackerTrackSelectionDataset(Dataset):
             # NOTE: reconstructed tracker tracks
             chunk["tracker_track"] = [
                 file[f"track_{each}"][:stop]  # type: ignore
-                for each in tracker_track_feature_list
+                for each in tracker_track_features
             ]
 
             # NOTE: reconstructed segments in the muon system
             chunk["dt_segment"] = [
                 file[f"dt_seg_{each}"][:stop]  # type: ignore
-                for each in dt_segment_feature_list
+                for each in dt_segment_features
             ]
 
             chunk["csc_segment"] = [
                 file[f"csc_seg_{each}"][:stop]  # type: ignore
-                for each in csc_segment_feature_list
+                for each in csc_segment_features
             ]
 
-            if gem_segment_feature_list is not None:
+            if gem_segment_features is not None:
                 chunk["gem_segment"] = [
                     file[f"gem_seg_{each}"][:stop]  # type: ignore
-                    for each in gem_segment_feature_list
+                    for each in gem_segment_features
                 ]
 
             # NOTE: reconstructed hits in the muon system
-            if rpc_hit_feature_list is not None:
+            if rpc_hit_features is not None:
                 chunk["rpc_hit"] = [
                     file[f"rpc_hit_{each}"][:stop]  # type: ignore
-                    for each in rpc_hit_feature_list
+                    for each in rpc_hit_features
                 ]
 
-            if gem_hit_feature_list is not None:
+            if gem_hit_features is not None:
                 chunk["gem_hit"] = [
                     file[f"gem_hit_{each}"][:stop]  # type: ignore
-                    for each in gem_hit_feature_list
+                    for each in gem_hit_features
                 ]
 
             chunk["target"] = [
@@ -184,11 +184,11 @@ class TrackerTrackSelectionDataset(Dataset):
             ]
 
         key_list_for_stack = ["tracker_track", "dt_segment", "csc_segment"]
-        if gem_segment_feature_list is not None:
+        if gem_segment_features is not None:
             key_list_for_stack.append("gem_segment")
-        if rpc_hit_feature_list is not None:
+        if rpc_hit_features is not None:
             key_list_for_stack.append("rpc_hit")
-        if gem_hit_feature_list is not None:
+        if gem_hit_features is not None:
             key_list_for_stack.append("gem_hit")
 
         for key in key_list_for_stack:
@@ -198,7 +198,7 @@ class TrackerTrackSelectionDataset(Dataset):
             TensorDict(dict(zip(chunk.keys(), each))) for each in zip(*chunk.values())
         ]
 
-    def apply(self, transforms: dict[str, Compose]) -> Self:
+    def apply_(self, transforms: dict[str, Compose]) -> Self:
         """Apply transforms transforms to all examples in-place.
 
         Args:
@@ -236,9 +236,7 @@ class TrackerTrackSelectionDataset(Dataset):
             tensors = [example[key] for example in example_list]
             padded = pad_sequence(tensors, batch_first=True, padding_value=0)
             batch_dict[key] = padded
-            if (
-                key != "target"
-            ):  # we can use tracker_track_data_mask for target (tracker_track_target)
+            if key != "target":  # we can use tracker_track_data_mask for target (tracker_track_target)
                 lengths = torch.tensor([t.shape[0] for t in tensors])
                 max_len = padded.shape[1]
                 mask = torch.arange(max_len).unsqueeze(0) < lengths.unsqueeze(1)

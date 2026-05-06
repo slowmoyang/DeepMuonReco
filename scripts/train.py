@@ -1,0 +1,508 @@
+import logging
+from pathlib import Path
+from dataclasses import asdict, dataclass
+import warnings
+import os
+from typing import Any
+from contextlib import nullcontext
+from socket import gethostname
+from getpass import getuser
+from datetime import datetime
+import secrets
+
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+from torch.nn.utils import clip_grad_norm_
+from torch.optim import Optimizer, lr_scheduler
+from torch.optim import AdamW
+from torch.optim.lr_scheduler import LinearLR
+from torch.optim.lr_scheduler import CosineAnnealingLR
+from torch.optim.lr_scheduler import SequentialLR
+from torch.utils.data import DataLoader
+
+from tensordict.nn import TensorDictModule
+
+from torchmetrics.aggregation import MeanMetric
+from torchmetrics.classification import BinaryAUROC
+
+import hydra
+from hydra.utils import instantiate
+from omegaconf import DictConfig
+from omegaconf import OmegaConf
+from coolname import generate_slug
+
+import aim
+from aim.sdk.objects.image import Image
+
+import tqdm.rich
+from tqdm import TqdmExperimentalWarning
+
+from hist import Hist
+
+import matplotlib as mpl
+import matplotlib.pyplot as plt
+import mplhep as mh
+
+from muonly.data.transforms import Compose
+from muonly.utils.optim import get_parameter_groups
+from muonly.callbacks import ModelCheckpoint
+from muonly.utils.reproducibility import set_seed
+
+mh.style.use("CMS")
+
+# FIXME: better way to set project root for hydra
+os.environ["PROJECT_ROOT"] = str(Path(__file__).parents[1].resolve())
+
+# FIXME:
+PRIMARY_JET_LABEL = 1
+
+_logger = logging.getLogger(__name__)
+logging.basicConfig(level=logging.INFO)
+
+warnings.filterwarnings("ignore", category=TqdmExperimentalWarning)
+
+for name in ["matplotlib", "PIL", "aim", "h5py", 'filelock']:
+    logging.getLogger(name).setLevel(logging.CRITICAL)
+
+OmegaConf.register_new_resolver(
+    name="slug",
+    resolver=lambda pattern=2: generate_slug(pattern=pattern),
+    use_cache=True,
+    replace=True,
+)
+
+OmegaConf.register_new_resolver(
+    name="randbits",
+    resolver=lambda k=32: secrets.randbits(k=k),
+    use_cache=True,
+    replace=True,
+)
+
+OmegaConf.register_new_resolver(
+    name="len",
+    resolver=len,
+)
+
+@dataclass
+class GlobalState:
+    """Class to hold global state information such as current step and epoch."""
+
+    step: int = 0
+    epoch: int = 0
+
+    def state_dict(self):
+        return asdict(self)
+
+
+def train(
+    model,
+    criterion: nn.Module,
+    data_loader: DataLoader,
+    optimizer: AdamW,
+    lr_scheduler: SequentialLR,
+    device: torch.device,
+    global_state: GlobalState,
+    config: DictConfig,
+    amp_context: torch.autocast | nullcontext,
+    aim_run: aim.Run,
+) -> None:
+    """ """
+    model.train()
+
+    progress_bar = tqdm.rich.tqdm(
+        data_loader,
+        desc="Training",
+        disable=(not config.misc.tqdm),
+    )
+
+    for batch in progress_bar:
+        batch = batch.to(device)
+
+        with amp_context:
+            batch = model(batch)
+
+            mask = batch["tracker_track_data_mask"]
+            logits = batch['logits'][mask]
+            target = batch["target"][mask]
+            loss = criterion(input=logits, target=target)
+            loss = loss.mean()
+
+        loss.backward()
+        clip_grad_norm_(
+            parameters=model.parameters(),
+            max_norm=config.optim.max_grad_norm,
+        )
+        optimizer.step()
+        optimizer.zero_grad()
+        lr_scheduler.step()
+
+        global_state.step += 1
+
+        aim_run.track(
+            value=loss.item(),
+            name="loss",
+            epoch=global_state.epoch,
+            step=global_state.step,
+            context={"subset": "train"},
+        )
+
+
+@torch.inference_mode()
+def validate(
+    model: nn.Module,
+    criterion: nn.Module,
+    data_loader: DataLoader,
+    device: torch.device,
+    config: DictConfig,
+    global_state: GlobalState,
+    aim_run: aim.Run,
+    amp_context: torch.autocast | nullcontext,
+) -> dict[str, Any]:
+    """ """
+    model.eval()
+
+    loss_metric = MeanMetric().to(device)
+    auroc_metric = BinaryAUROC().to(device)
+
+    progress_bar = tqdm.rich.tqdm(
+        data_loader, desc="Evaluating", disable=(not config.misc.tqdm),
+    )
+
+    for batch in progress_bar:
+        batch = batch.to(device)
+
+        with amp_context:
+            batch = model(batch)
+
+            mask = batch["tracker_track_data_mask"]
+            logits = batch['logits'][mask]
+            target = batch["target"][mask]
+            preds = logits.sigmoid()
+            loss = criterion(input=logits, target=target)
+
+            loss_metric.update(loss)
+            auroc_metric.update(preds=preds, target=target)
+
+    result = {}
+    result["loss"] = loss_metric.compute().item()
+    result["auroc"] = auroc_metric.compute().item()
+
+    return result
+
+
+def configure_lr_scheduler(
+    optimizer: Optimizer,
+    num_steps_per_epoch: int,
+    max_epochs: int,
+    max_lr: float,
+    warmup_frac: float,
+    warmup_start_factor: float,
+    annealing_eta_min_factor: float,
+) -> SequentialLR:
+    """
+    """
+    total_steps = num_steps_per_epoch * max_epochs
+    warmup_steps = int(warmup_frac * total_steps)
+    annealing_steps = total_steps - warmup_steps
+
+    warmup = LinearLR(
+        optimizer=optimizer,
+        start_factor=warmup_start_factor,
+        total_iters=warmup_steps,
+    )
+
+    annealing_eta_min = max_lr * annealing_eta_min_factor
+    annealing = CosineAnnealingLR(
+        optimizer=optimizer,
+        T_max=annealing_steps,
+        eta_min=annealing_eta_min,
+    )
+
+    lr_scheduler = SequentialLR(
+        optimizer=optimizer,
+        schedulers=[
+            warmup,
+            annealing,
+        ],
+        milestones=[
+            warmup_steps,
+        ],
+    )
+
+    return lr_scheduler
+
+
+
+def run(aim_run: aim.Run, config: DictConfig):
+    """ """
+    run_dir = Path(config.paths.run_dir)
+
+    #---------------------------------------------------------------------------
+    # Save config
+    #---------------------------------------------------------------------------
+    with open(run_dir / "config.yaml", "w") as file:
+        OmegaConf.save(config=config, f=file, resolve=True)
+
+    aim_run.name = config.run
+    aim_run["config"] = OmegaConf.to_container(config, resolve=True)
+
+    #---------------------------------------------------------------------------
+    # PyTorch setup
+    #---------------------------------------------------------------------------
+    torch.set_float32_matmul_precision(config.torch.float32_matmul_precision)
+    if config.torch.num_threads is not None:
+        torch.set_num_threads(config.torch.num_threads)
+    if config.torch.num_interop_threads is not None:
+        torch.set_num_interop_threads(config.torch.num_interop_threads)
+
+    set_seed(config.torch.seed)
+
+    device = torch.device(config.torch.device)
+    _logger.info(f"{device=}")
+
+    #---------------------------------------------------------------------------
+    # Instantiate model
+    #---------------------------------------------------------------------------
+    raw_model = instantiate(config.model)
+    _logger.info(f"{raw_model=}")
+
+    in_key_list = [
+        "tracker_track",
+        "tracker_track_data_mask",
+        "dt_segment",
+        "dt_segment_data_mask",
+        "csc_segment",
+        "csc_segment_data_mask",
+        "gem_segment",
+        "gem_segment_data_mask",
+        "rpc_hit",
+        "rpc_hit_data_mask",
+        "gem_hit",
+        "gem_hit_data_mask",
+    ]
+
+    in_keys = {each: each for each in in_key_list}
+
+    model = TensorDictModule(
+        module=raw_model,
+        in_keys=in_keys,
+        out_keys=[
+            "logits",
+        ],
+    )
+
+    #---------------------------------------------------------------------------
+    # Dataset
+    #---------------------------------------------------------------------------
+    train_set = instantiate(config.dataset.dataset)(**config.dataset.train)
+    _logger.info(f'{train_set=}')
+    _logger.info(f"Number of training examples: {len(train_set)}")
+
+    val_set = instantiate(config.dataset.dataset)(**config.dataset.val)
+    _logger.info(f'{val_set=}')
+    _logger.info(f"Number of validation examples: {len(val_set)}")
+
+    #---------------------------------------------------------------------------
+    # Preprocessing
+    #---------------------------------------------------------------------------
+    preprocessing = {
+        key: Compose(instantiate(value))
+        for key, value in config.preprocessing.items()
+    }
+
+    train_set.apply_(preprocessing)
+    val_set.apply_(preprocessing)
+
+    #---------------------------------------------------------------------------
+    # Data loaders
+    #---------------------------------------------------------------------------
+    pin_memory = config.data_loader.pin_memory and (device.type == 'cuda')
+
+    train_loader = DataLoader(
+        dataset=train_set,
+        batch_size=config.data_loader.batch_size,
+        shuffle=True,
+        num_workers=config.data_loader.num_workers,
+        collate_fn=train_set.collate,
+        pin_memory=pin_memory,
+        drop_last=True, # drop last to avoid issues stem from small non-representative batches during training
+        generator=torch.Generator().manual_seed(config.torch.seed), # ensure reproducibility when shuffling
+    )
+    _logger.info(f"Number of training batches: {len(train_loader)}")
+
+    val_loader = DataLoader(
+        dataset=val_set,
+        batch_size=config.data_loader.eval_batch_size,
+        shuffle=False,  # no shuffling for evaluation
+        num_workers=config.data_loader.num_workers,
+        collate_fn=val_set.collate,
+        pin_memory=pin_memory,
+        drop_last=False,  # we want to validate on all validation examples
+    )
+    _logger.info(f"Number of validation batches: {len(val_loader)}")
+
+    #---------------------------------------------------------------------------
+    # criterion
+    #---------------------------------------------------------------------------
+    criterion = nn.BCEWithLogitsLoss(
+        pos_weight=torch.tensor(config.optim.pos_weight),
+        reduction="none",
+    )
+
+    #---------------------------------------------------------------------------
+    # Optimization
+    #---------------------------------------------------------------------------
+    optimizer = AdamW(
+        params=get_parameter_groups(
+            model=model,
+            weight_decay=config.optim.weight_decay,
+        ),
+        lr=config.optim.lr,
+        betas=(
+            config.optim.beta1,
+            config.optim.beta2,
+        ),
+    )
+    _logger.info(f"{optimizer=}")
+
+    #---------------------------------------------------------------------------
+    # Learning rate scheduler
+    #---------------------------------------------------------------------------
+    lr_scheduler = configure_lr_scheduler(
+        optimizer=optimizer,
+        num_steps_per_epoch=len(train_loader),
+        max_epochs=config.optim.max_epochs,
+        max_lr=config.optim.lr,
+        warmup_frac=config.optim.warmup.frac_steps,
+        warmup_start_factor=config.optim.warmup.start_factor,
+        annealing_eta_min_factor=config.optim.annealing.eta_min_factor,
+    )
+
+    #---------------------------------------------------------------------------
+    # GPU setup
+    #---------------------------------------------------------------------------
+    # torch.autograd.set_detect_anomaly(True) # TODO: switch to this for debugging
+
+    _logger.info("Moving model and criterion to device...")
+
+    model = model.to(device)
+    criterion = criterion.to(device)
+
+    #---------------------------------------------------------------------------
+    # Mixed precision setup
+    #---------------------------------------------------------------------------
+    if config.torch.precision == "float32":
+        _logger.info("Using full precision (float32) for training.")
+        amp_context = nullcontext()
+    elif config.torch.precision == "bfloat16":
+        _logger.info("Using mixed precision (bfloat16) for training.")
+        amp_context = torch.autocast(device_type=device.type, dtype=torch.bfloat16)
+    else:
+        raise ValueError(f"Unsupported precision: {config.torch.precision}")
+
+    #---------------------------------------------------------------------------
+    #
+    #---------------------------------------------------------------------------
+    global_state = GlobalState()
+
+    #---------------------------------------------------------------------------
+    # Checkpointing setup
+    #---------------------------------------------------------------------------
+    ckpt_dir = run_dir / "checkpoints"
+
+    model_checkpoint = ModelCheckpoint(
+        object_dict={
+            "model": model,
+            "optimizer": optimizer,
+            "lr_scheduler": lr_scheduler,
+            "global_state": global_state,
+        },
+        metric="loss",
+        mode="min",
+        output_dir=ckpt_dir,
+    )
+
+    ############################################################################
+    #
+    ############################################################################
+
+    for epoch in tqdm.rich.trange(0, 1 + config.optim.max_epochs, desc="Epoch"):
+        global_state.epoch = epoch
+        if epoch >= 1:
+            train(
+                model=model,
+                criterion=criterion,
+                data_loader=train_loader,
+                optimizer=optimizer,
+                lr_scheduler=lr_scheduler,
+                device=device,
+                global_state=global_state,
+                aim_run=aim_run,
+                config=config,
+                amp_context=amp_context,
+            )
+
+        val_result = validate(
+            model=model,
+            criterion=criterion,
+            data_loader=val_loader,
+            device=device,
+            config=config,
+            global_state=global_state,
+            aim_run=aim_run,
+            amp_context=amp_context,
+        )
+
+        for key, value in val_result.items():
+            aim_run.track(
+                value=value,
+                name=key,
+                epoch=global_state.epoch,
+                step=global_state.step,
+                context={"subset": "val"},
+            )
+        plt.close("all")
+
+        _logger.info(f"Epoch {epoch}: {val_result=}")
+
+        model_checkpoint.step(metric=val_result)
+
+    ############################################################################
+    #
+    ############################################################################
+
+    best_checkpoint = torch.load(model_checkpoint.best_path)
+    model.load_state_dict(best_checkpoint["model"])
+    del best_checkpoint
+
+    # final evaluation on the validation set using the best model checkpoint
+
+@hydra.main(
+    config_path="../config",
+    config_name="main",
+    version_base=None,
+)
+def main(config: DictConfig):
+
+    aim_run = aim.Run(
+        repo=config.paths.log_dir,
+        experiment=config.exp,
+        log_system_params=True,
+        capture_terminal_logs=True,
+    )
+
+    try:
+        run(aim_run=aim_run, config=config)
+    except Exception as error:
+        _logger.exception(f"An error occurred during training: {error}")
+        _logger.info("Closing Aim run due to error.")
+        aim_run.close()
+        raise error
+    finally:
+        _logger.info("Closing Aim run.")
+        aim_run.close()
+
+
+if __name__ == "__main__":
+    main()

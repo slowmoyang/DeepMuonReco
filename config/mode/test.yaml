@@ -3,8 +3,7 @@
 defaults:
   - default
 
-exp:
-  name: test
+exp: test
 
 trainer:
   max_epochs: 10

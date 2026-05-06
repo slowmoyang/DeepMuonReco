@@ -1,44 +1,53 @@
+# preprocessing parameters are determined from mu2030pu
+
+target_key: track_is_trk_muon
+
 tracker_track:
-  dim: ${len:${.features}}
   features: [px, py, pz, vx, vy, vz, charge]
+  dim: ${len:${.features}}
   preprocessing:
-  - _target_: muonly.nn.SignedLog1p
+  - _target_: muonly.data.transforms.SignedLog1p
     index: [0, 1, 2, 3, 4, 5]
-  - _target_: muonly.nn.MinMaxScaling
+  - _target_: muonly.data.transforms.MinMaxScaling
     input_min: [-14.243, -14.302, -15.286, -4.678, -4.946, -6.193, -1.000]
     input_max: [13.967, 12.497, 14.909, 5.152, 3.461, 5.638, 1.000]
+
 dt_segment:
-  dim: ${len:${.features}}
   features: [pos_x, pos_y, pos_z, dir_x, dir_y, dir_z]
+  dim: ${len:${.features}}
   preprocessing:
-  - _target_: muonly.nn.MinMaxScaling
+  - _target_: muonly.data.transforms.MinMaxScaling
     input_min: [-787.279, -720.460, -652.168, -1.000, -1.000, -0.957]
     input_max: [779.118, 720.495, 652.156, 1.000, 1.000, 0.958]
+
 csc_segment:
-  dim: ${len:${.features}}
   features: [pos_x, pos_y, pos_z, dir_x, dir_y, dir_z]
+  dim: ${len:${.features}}
   preprocessing:
-  - _target_: muonly.nn.MinMaxScaling
+  - _target_: muonly.data.transforms.MinMaxScaling
     input_min: [-687.410, -686.932, -1037.543, -0.999, -0.997, -1.000]
     input_max: [685.690, 685.244, 1037.743, 0.998, 0.999, 1.000]
+
 gem_segment:
-  dim: ${len:${.features}}
   features: [pos_x, pos_y, pos_z, dir_x, dir_y, dir_z]
+  dim: ${len:${.features}}
   preprocessing:
-  - _target_: muonly.nn.MinMaxScaling
+  - _target_: muonly.data.transforms.MinMaxScaling
     input_min: [-142.873, -144.459, -538.790, -0.844, -0.843, -1.000]
     input_max: [142.960, 144.926, 538.790, 0.831, 0.838, 1.000]
+
 rpc_hit:
-  dim: ${len:${.features}}
   features: [pos_x, pos_y, pos_z]
+  dim: ${len:${.features}}
   preprocessing:
-  - _target_: muonly.nn.MinMaxScaling
+  - _target_: muonly.data.transforms.MinMaxScaling
     input_min: [-754.477, -704.550, -1066.155]
     input_max: [754.477, 704.550, 1066.155]
+
 gem_hit:
-  dim: ${len:${.features}}
   features: [pos_x, pos_y, pos_z]
+  dim: ${len:${.features}}
   preprocessing:
-  - _target_: muonly.nn.MinMaxScaling
+  - _target_: muonly.data.transforms.MinMaxScaling
     input_min: [-312.149, -312.149, -799.551]
     input_max: [312.149, 312.149, 799.551]

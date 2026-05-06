@@ -30,6 +30,7 @@ dependencies = [
     "setuptools==81.0.0",
     "mplhep>=1.1.2",
     "ruff>=0.15.4",
+    "h5glance>=0.9.0",
 ]
 
 [dependency-groups]

@@ -1,0 +1,15 @@
+# @package _global_
+
+defaults:
+  - debug
+
+dataset:
+  train:
+    max_events: 1024
+  val:
+    max_events: 1024
+  test:
+    max_events: 1024
+
+optim:
+  max_epochs: 2

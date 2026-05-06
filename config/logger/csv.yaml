@@ -1,4 +1,0 @@
-_target_: lightning.pytorch.loggers.csv_logs.CSVLogger
-save_dir: "${paths.run_dir}"
-name: "csv/"
-prefix: ""
