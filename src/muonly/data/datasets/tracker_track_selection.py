@@ -236,7 +236,9 @@ class TrackerTrackSelectionDataset(Dataset):
             tensors = [example[key] for example in example_list]
             padded = pad_sequence(tensors, batch_first=True, padding_value=0)
             batch_dict[key] = padded
-            if key != "target":  # we can use tracker_track_data_mask for target (tracker_track_target)
+            if (
+                key != "target"
+            ):  # we can use tracker_track_data_mask for target (tracker_track_target)
                 lengths = torch.tensor([t.shape[0] for t in tensors])
                 max_len = padded.shape[1]
                 mask = torch.arange(max_len).unsqueeze(0) < lengths.unsqueeze(1)
