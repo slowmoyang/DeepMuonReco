@@ -218,7 +218,7 @@ class TrackerTrackSelectionDataset(Dataset):
                 del transforms[key]
 
         for key, value in transforms.items():
-            _logger.info(f"Applying the following transforms to {key}: {value}")
+            _logger.debug(f"Applying the following transforms to {key}: {value}")
 
         _logger.info(f"Applying transforms to {len(self.example_list)} examples ...")
         for example in tqdm.rich.tqdm(self.example_list):

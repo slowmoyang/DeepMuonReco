@@ -42,6 +42,8 @@ from muonly.data.transforms import Compose
 from muonly.utils.optim import get_parameter_groups
 from muonly.utils.optim import configure_lr_scheduler
 from muonly.callbacks import ModelCheckpoint
+from muonly.callbacks import MemoryTracker
+from muonly.callbacks import CUDAMemoryTracker
 from muonly.utils.reproducibility import set_seed
 
 mh.style.use("CMS")
@@ -262,6 +264,17 @@ def run(
     """
     run_dir = Path(config.paths.run_dir)
 
+    memory_tracker = MemoryTracker(
+        aim_run=aim_run,
+        output_dir=run_dir,
+    )
+
+    cuda_memory_tracker = CUDAMemoryTracker(
+        device=torch.device(config.torch.device),
+        aim_run=aim_run,
+        output_dir=run_dir,
+    )
+
     # ---------------------------------------------------------------------------
     # Save config
     # ---------------------------------------------------------------------------
@@ -288,37 +301,45 @@ def run(
     # ---------------------------------------------------------------------------
     # Instantiate model
     # ---------------------------------------------------------------------------
-    raw_model = instantiate(config.model)
+    model = instantiate(config.model)
+    memory_tracker.track("model_instantiated")
 
     # summarize model
-    model_statistics = torchinfo.summary(model=raw_model, verbose=False)
+    model_statistics = torchinfo.summary(model=model, verbose=False)
     _logger.info(f"Model summary:\n{model_statistics}")
 
-    with open(run_dir / "model_summary.txt", "w") as file:
+    with open(run_dir / "model-summary.txt", "w") as file:
         file.write(f"{model_statistics}")
         file.write("\n\n")
-        file.write(f"Model architecture:\n{raw_model}")
-
-    # ---------------------------------------------------------------------------
-    # Wrap model with TensorDictModule to handle input and output keys
-    # ---------------------------------------------------------------------------
-
-    model = TensorDictModule(
-        module=raw_model,
-        in_keys=configure_model_in_keys(config=config),
-        out_keys=[
-            "logits",
-        ],
-    )
+        file.write(f"Model architecture:\n{model}")
 
     # ---------------------------------------------------------------------------
     # Model compilation
     # NOTE:
     # ---------------------------------------------------------------------------
     if config.torch.compile:
+        _logger.warning("Model compilation might cause many issues. Make sure to test the compiled model thoroughly before using it for training.")
         _logger.info("Compiling model with torch.compile...")
-        model = torch.compile(model, mode="reduce-overhead")
+        compiled_model = torch.compile(model, mode="reduce-overhead")
         _logger.info("Model compilation completed.")
+    else:
+        compiled_model = None
+        _logger.info("Model compilation is disabled. Using original model.")
+
+    # ---------------------------------------------------------------------------
+    # Wrap model with TensorDictModule to handle input and output keys
+    # ---------------------------------------------------------------------------
+
+    td_model = TensorDictModule(
+        module=(compiled_model if compiled_model is not None else model),
+        in_keys=configure_model_in_keys(config=config),
+        out_keys=[
+            "logits",
+        ],
+    )
+
+    memory_tracker.track("model_tensor_dict")
+
 
     # ---------------------------------------------------------------------------
     # Dataset
@@ -327,9 +348,13 @@ def run(
     _logger.info(f"{train_set=}")
     _logger.info(f"Number of training examples: {len(train_set)}")
 
+    memory_tracker.track("train_set_instantiated")
+
     val_set = instantiate(config.dataset.dataset)(**config.dataset.val)
     _logger.info(f"{val_set=}")
     _logger.info(f"Number of validation examples: {len(val_set)}")
+
+    memory_tracker.track("val_set_instantiated")
 
     # ---------------------------------------------------------------------------
     # Preprocessing
@@ -340,6 +365,8 @@ def run(
 
     train_set.apply_(preprocessing)
     val_set.apply_(preprocessing)
+
+    memory_tracker.track("preprocessing")
 
     # ---------------------------------------------------------------------------
     # Data loaders
@@ -413,8 +440,12 @@ def run(
     # ---------------------------------------------------------------------------
     _logger.info("Moving model and criterion to device...")
 
+    cuda_memory_tracker.track("before_move_to_device")
+
     model = model.to(device)
     criterion = criterion.to(device)
+
+    cuda_memory_tracker.track("after_move_to_device")
 
     # ---------------------------------------------------------------------------
     # Mixed precision setup
@@ -440,7 +471,7 @@ def run(
 
     model_checkpoint = ModelCheckpoint(
         object_dict={
-            "model": raw_model,
+            "model": model,
             "optimizer": optimizer,
             "lr_scheduler": lr_scheduler,
             "global_state": global_state,
@@ -454,12 +485,14 @@ def run(
     # Training loop
     #---------------------------------------------------------------------------
 
+    cuda_memory_tracker.track("before_training_loop")
+
     for epoch in tqdm.rich.trange(0, 1 + config.optim.max_epochs, desc="Epoch"):
         global_state.epoch = epoch
 
         if epoch >= 1:
             train(
-                model=model,
+                model=td_model,
                 criterion=criterion,
                 data_loader=train_loader,
                 optimizer=optimizer,
@@ -470,9 +503,11 @@ def run(
                 config=config,
                 amp_context=amp_context,
             )
+            memory_tracker.track(f'epoch_{epoch:06d}_train')
+            cuda_memory_tracker.track(f'epoch_{epoch:06d}_train')
 
         val_result = validate(
-            model=model,
+            model=td_model,
             criterion=criterion,
             data_loader=val_loader,
             device=device,
@@ -481,6 +516,9 @@ def run(
             aim_run=aim_run,
             amp_context=amp_context,
         )
+
+        memory_tracker.track(f'epoch_{epoch:06d}_val')
+        cuda_memory_tracker.track(f'epoch_{epoch:06d}_val')
 
         for key, value in val_result.items():
             aim_run.track(
@@ -504,28 +542,13 @@ def run(
     # ---------------------------------------------------------------------------
     # Final evaluation and cleanup
     # ---------------------------------------------------------------------------
-    if device.type == "cuda":
-        device_properties = torch.cuda.get_device_properties(device)
-        _logger.info("CUDA device information:")
-        _logger.info(f"  - Device name: {device_properties.name}")
-        _logger.info(f"  - Device UUID: {device_properties.uuid}")
-        _logger.info(
-            f"  - Memory summary:\n{torch.cuda.memory_summary(device=device, abbreviated=True)}"
-        )
-
-        with open(run_dir / "training-cuda-summary.txt", "w") as file:
-            file.write(f"Device name: {device_properties.name}\n")
-            file.write(f"Device UUID: {device_properties.uuid}\n")
-            file.write(
-                f"Memory summary:\n{torch.cuda.memory_summary(device=device, abbreviated=False)}\n"
-            )
 
     # ---------------------------------------------------------------------------
     # Load best checkpoint
     # ---------------------------------------------------------------------------
 
     best_checkpoint = torch.load(model_checkpoint.best_path)
-    raw_model.load_state_dict(best_checkpoint["model"])
+    model.load_state_dict(best_checkpoint["model"])
     del best_checkpoint
 
     # ---------------------------------------------------------------------------

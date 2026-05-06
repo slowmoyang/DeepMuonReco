@@ -32,6 +32,8 @@ dependencies = [
     "ruff>=0.15.4",
     "h5glance>=0.9.0",
     "torchinfo>=1.8.0",
+    "psutil>=7.2.2",
+    "humanize>=4.15.0",
 ]
 
 [dependency-groups]
