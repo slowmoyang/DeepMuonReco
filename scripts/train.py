@@ -286,8 +286,10 @@ def run(
     # PyTorch setup
     # ---------------------------------------------------------------------------
     torch.set_float32_matmul_precision(config.torch.float32_matmul_precision)
+
     if config.torch.num_threads is not None:
         torch.set_num_threads(config.torch.num_threads)
+
     if config.torch.num_interop_threads is not None:
         torch.set_num_interop_threads(config.torch.num_interop_threads)
 
@@ -295,6 +297,8 @@ def run(
 
     device = torch.device(config.torch.device)
     _logger.info(f"{device=}")
+    if device.type == "cuda":
+        _logger.info(f"GPU Name: {torch.cuda.get_device_name(device)}")
 
     # ---------------------------------------------------------------------------
     # Instantiate model
@@ -307,13 +311,14 @@ def run(
     _logger.info(f"Model summary:\n{model_statistics}")
 
     with open(run_dir / "model-summary.txt", "w") as file:
-        file.write(f"{model_statistics}")
-        file.write("\n\n")
-        file.write(f"Model architecture:\n{model}")
+        file.write(
+            f"{model_statistics}\n\n"
+            f"Model architecture:\n{model}"
+        )
 
     # ---------------------------------------------------------------------------
     # Model compilation
-    # NOTE:
+    # FIXME: failed to compile the model with torch 2.10.0 on khu
     # ---------------------------------------------------------------------------
     if config.torch.compile:
         _logger.warning("Model compilation might cause many issues. Make sure to test the compiled model thoroughly before using it for training.")
@@ -337,7 +342,6 @@ def run(
     )
 
     memory_tracker.track("model_tensor_dict")
-
 
     # ---------------------------------------------------------------------------
     # Dataset
@@ -370,6 +374,7 @@ def run(
     # Data loaders
     # ---------------------------------------------------------------------------
     pin_memory = config.data_loader.pin_memory and (device.type == "cuda")
+    _logger.info(f"{pin_memory=}")
 
     train_loader = DataLoader(
         dataset=train_set,
@@ -560,7 +565,7 @@ def run(
     config_name="main",
     version_base=None,
 )
-def main(config: DictConfig):
+def main(config: DictConfig) -> None:
 
     aim_run = aim.Run(
         repo=config.paths.log_dir,
@@ -570,13 +575,15 @@ def main(config: DictConfig):
     )
 
     try:
+        if config.torch.detect_anomaly:
+            _logger.warning("PyTorch anomaly detection is enabled. This may significantly slow down training. Use with caution.")
+
         with torch.autograd.set_detect_anomaly(
             mode=config.torch.detect_anomaly, check_nan=config.torch.check_nan
         ):
             run(aim_run=aim_run, config=config)
     except Exception as error:
         _logger.exception(f"An error occurred during training: {error}")
-        _logger.info("Closing Aim run due to error.")
         aim_run.close()
         raise error
     finally:

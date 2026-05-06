@@ -220,11 +220,11 @@ class TrackerTrackSelectionDataset(Dataset):
         for key, value in transforms.items():
             _logger.debug(f"Applying the following transforms to {key}: {value}")
 
-        _logger.info(f"Applying transforms to {len(self.example_list)} examples ...")
+        _logger.debug(f"Applying transforms to {len(self.example_list)} examples ...")
         for example in tqdm.rich.tqdm(self.example_list):
             for key, value in transforms.items():
                 example[key] = value(example[key])
-        _logger.info(f"Applied transforms to {len(self.example_list)} examples.")
+        _logger.debug(f"Applied transforms to {len(self.example_list)} examples.")
 
         return self
 

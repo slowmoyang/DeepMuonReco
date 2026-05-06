@@ -1,7 +1,6 @@
 import os
 from pathlib import Path
 import logging
-import aim
 import psutil
 import torch
 import pandas as pd
