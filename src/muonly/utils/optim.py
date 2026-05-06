@@ -2,9 +2,19 @@ import logging
 import torch.nn as nn
 from torch.nn.modules.conv import _ConvNd
 from torch.nn.modules.batchnorm import _BatchNorm
+from torch.optim import Optimizer
+from torch.optim.lr_scheduler import CosineAnnealingLR
+from torch.optim.lr_scheduler import LinearLR
+from torch.optim.lr_scheduler import SequentialLR
 
 
 _logger = logging.getLogger(__name__)
+
+
+__all__ = [
+    "get_parameter_groups",
+    "configure_lr_scheduler",
+]
 
 
 def get_parameter_groups(
@@ -82,3 +92,44 @@ def get_parameter_groups(
         {"params": decay_param_list, "weight_decay": weight_decay},
         {"params": no_decay_param_list, "weight_decay": 0.0},
     ]
+
+
+def configure_lr_scheduler(
+    optimizer: Optimizer,
+    num_steps_per_epoch: int,
+    max_epochs: int,
+    max_lr: float,
+    warmup_frac: float,
+    warmup_start_factor: float,
+    annealing_eta_min_factor: float,
+) -> SequentialLR:
+    """ """
+    total_steps = num_steps_per_epoch * max_epochs
+    warmup_steps = int(warmup_frac * total_steps)
+    annealing_steps = total_steps - warmup_steps
+
+    warmup = LinearLR(
+        optimizer=optimizer,
+        start_factor=warmup_start_factor,
+        total_iters=warmup_steps,
+    )
+
+    annealing_eta_min = max_lr * annealing_eta_min_factor
+    annealing = CosineAnnealingLR(
+        optimizer=optimizer,
+        T_max=annealing_steps,
+        eta_min=annealing_eta_min,
+    )
+
+    lr_scheduler = SequentialLR(
+        optimizer=optimizer,
+        schedulers=[
+            warmup,
+            annealing,
+        ],
+        milestones=[
+            warmup_steps,
+        ],
+    )
+
+    return lr_scheduler

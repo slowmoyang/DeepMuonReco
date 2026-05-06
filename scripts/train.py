@@ -10,10 +10,7 @@ import secrets
 import torch
 import torch.nn as nn
 from torch.nn.utils import clip_grad_norm_
-from torch.optim import Optimizer
 from torch.optim import AdamW
-from torch.optim.lr_scheduler import LinearLR
-from torch.optim.lr_scheduler import CosineAnnealingLR
 from torch.optim.lr_scheduler import SequentialLR
 from torch.utils.data import DataLoader
 
@@ -43,6 +40,7 @@ import mplhep as mh
 
 from muonly.data.transforms import Compose
 from muonly.utils.optim import get_parameter_groups
+from muonly.utils.optim import configure_lr_scheduler
 from muonly.callbacks import ModelCheckpoint
 from muonly.utils.reproducibility import set_seed
 
@@ -103,7 +101,6 @@ class GlobalState:
             self.best_epoch = self.epoch
             self.best_val_loss = loss
             self.best_val_auroc = auroc
-
 
     def __str__(self):
         return (
@@ -178,20 +175,25 @@ def validate(
     amp_context: torch.autocast | nullcontext,
 ) -> dict[str, Any]:
     """ """
+    #---------------------------------------------------------------------------
+    #
+    #---------------------------------------------------------------------------
     model.eval()
+
+    #---------------------------------------------------------------------------
+    # Metrics and histogram setup
+    #---------------------------------------------------------------------------
 
     loss_metric = MeanMetric().to(device)
     auroc_metric = BinaryAUROC().to(device)
     h_sig = Hist.new.Reg(40, 0, 1).Double()
     h_bkg = h_sig.copy()
 
-    progress_bar = tqdm.rich.tqdm(
-        data_loader,
-        desc="Evaluating",
-        disable=(not config.misc.tqdm),
-    )
+    #---------------------------------------------------------------------------
+    #
+    #---------------------------------------------------------------------------
 
-    for batch in progress_bar:
+    for batch in tqdm.rich.tqdm(data_loader, desc="Evaluating", disable=(not config.misc.tqdm)):
         batch = batch.to(device)
 
         with amp_context:
@@ -208,63 +210,56 @@ def validate(
         h_sig.fill(preds[target == 1].cpu().float().numpy())
         h_bkg.fill(preds[target == 0].cpu().float().numpy())
 
+    #---------------------------------------------------------------------------
+    #
+    #---------------------------------------------------------------------------
     result = {}
     result["loss"] = loss_metric.compute().item()
     result["auroc"] = auroc_metric.compute().item()
 
+    # NOTE:
     fig, ax = plt.subplots()
     h_bkg.plot(ax=ax, label="background", histtype="step", color="tab:blue")
     h_sig.plot(ax=ax, label="signal", histtype="step", color="tab:orange")
     ax.set_xlabel("Score")
     ax.set_ylabel("Count")
-    result['dist_score'] = Image(fig)
+    result["dist_score"] = Image(fig)
 
     return result
 
 
-def configure_lr_scheduler(
-    optimizer: Optimizer,
-    num_steps_per_epoch: int,
-    max_epochs: int,
-    max_lr: float,
-    warmup_frac: float,
-    warmup_start_factor: float,
-    annealing_eta_min_factor: float,
-) -> SequentialLR:
-    """ """
-    total_steps = num_steps_per_epoch * max_epochs
-    warmup_steps = int(warmup_frac * total_steps)
-    annealing_steps = total_steps - warmup_steps
+def configure_model_in_keys(config: DictConfig) -> dict[str, str]:
+    """Configure the input keys for the model based on the data configuration.
+    """
+    in_key_list = []
+    if config.data.tracker_track:
+        in_key_list += ["tracker_track", "tracker_track_data_mask"]
+    if config.data.dt_segment:
+        in_key_list += ["dt_segment", "dt_segment_data_mask"]
+    if config.data.csc_segment:
+        in_key_list += ["csc_segment", "csc_segment_data_mask"]
+    if config.data.gem_segment:
+        in_key_list += ["gem_segment", "gem_segment_data_mask"]
+    if config.data.rpc_hit:
+        in_key_list += ["rpc_hit", "rpc_hit_data_mask"]
+    if config.data.gem_hit:
+        in_key_list += ["gem_hit", "gem_hit_data_mask"]
 
-    warmup = LinearLR(
-        optimizer=optimizer,
-        start_factor=warmup_start_factor,
-        total_iters=warmup_steps,
-    )
-
-    annealing_eta_min = max_lr * annealing_eta_min_factor
-    annealing = CosineAnnealingLR(
-        optimizer=optimizer,
-        T_max=annealing_steps,
-        eta_min=annealing_eta_min,
-    )
-
-    lr_scheduler = SequentialLR(
-        optimizer=optimizer,
-        schedulers=[
-            warmup,
-            annealing,
-        ],
-        milestones=[
-            warmup_steps,
-        ],
-    )
-
-    return lr_scheduler
+    in_keys = {each: each for each in in_key_list}
+    return in_keys
 
 
-def run(aim_run: aim.Run, config: DictConfig):
-    """ """
+def run(
+    aim_run: aim.Run,
+    config: DictConfig,
+) -> None:
+    """
+    Args:
+        aim_run: Aim run object for logging and tracking.
+        config: Configuration object containing all settings for the run.
+    Returns:
+        None
+    """
     run_dir = Path(config.paths.run_dir)
 
     # ---------------------------------------------------------------------------
@@ -305,34 +300,20 @@ def run(aim_run: aim.Run, config: DictConfig):
         file.write(f"Model architecture:\n{raw_model}")
 
     # ---------------------------------------------------------------------------
-    #
+    # Wrap model with TensorDictModule to handle input and output keys
     # ---------------------------------------------------------------------------
-    in_key_list = []
-    if config.data.tracker_track:
-        in_key_list += ["tracker_track", "tracker_track_data_mask"]
-    if config.data.dt_segment:
-        in_key_list += ["dt_segment", "dt_segment_data_mask"]
-    if config.data.csc_segment:
-        in_key_list += ["csc_segment", "csc_segment_data_mask"]
-    if config.data.gem_segment:
-        in_key_list += ["gem_segment", "gem_segment_data_mask"]
-    if config.data.rpc_hit:
-        in_key_list += ["rpc_hit", "rpc_hit_data_mask"]
-    if config.data.gem_hit:
-        in_key_list += ["gem_hit", "gem_hit_data_mask"]
-
-    in_keys = {each: each for each in in_key_list}
 
     model = TensorDictModule(
         module=raw_model,
-        in_keys=in_keys,
+        in_keys=configure_model_in_keys(config=config),
         out_keys=[
             "logits",
         ],
     )
 
     # ---------------------------------------------------------------------------
-    #
+    # Model compilation
+    # NOTE:
     # ---------------------------------------------------------------------------
     if config.torch.compile:
         _logger.info("Compiling model with torch.compile...")
@@ -469,9 +450,9 @@ def run(aim_run: aim.Run, config: DictConfig):
         output_dir=ckpt_dir,
     )
 
-    ############################################################################
-    #
-    ############################################################################
+    #---------------------------------------------------------------------------
+    # Training loop
+    #---------------------------------------------------------------------------
 
     for epoch in tqdm.rich.trange(0, 1 + config.optim.max_epochs, desc="Epoch"):
         global_state.epoch = epoch
@@ -520,16 +501,38 @@ def run(aim_run: aim.Run, config: DictConfig):
 
         model_checkpoint.step(metric=val_result)
 
-    ############################################################################
-    #
-    ############################################################################
+    # ---------------------------------------------------------------------------
+    # Final evaluation and cleanup
+    # ---------------------------------------------------------------------------
+    if device.type == "cuda":
+        device_properties = torch.cuda.get_device_properties(device)
+        _logger.info("CUDA device information:")
+        _logger.info(f"  - Device name: {device_properties.name}")
+        _logger.info(f"  - Device UUID: {device_properties.uuid}")
+        _logger.info(
+            f"  - Memory summary:\n{torch.cuda.memory_summary(device=device, abbreviated=True)}"
+        )
+
+        with open(run_dir / "training-cuda-summary.txt", "w") as file:
+            file.write(f"Device name: {device_properties.name}\n")
+            file.write(f"Device UUID: {device_properties.uuid}\n")
+            file.write(
+                f"Memory summary:\n{torch.cuda.memory_summary(device=device, abbreviated=False)}\n"
+            )
+
+    # ---------------------------------------------------------------------------
+    # Load best checkpoint
+    # ---------------------------------------------------------------------------
 
     best_checkpoint = torch.load(model_checkpoint.best_path)
     raw_model.load_state_dict(best_checkpoint["model"])
     del best_checkpoint
 
-    # final evaluation on the validation set using the best model checkpoint
+    # ---------------------------------------------------------------------------
+    # Run final evaluation on validation set with best model checkpoint
+    # ---------------------------------------------------------------------------
 
+    # TODO:
 
 @hydra.main(
     config_path="../config",
@@ -546,7 +549,9 @@ def main(config: DictConfig):
     )
 
     try:
-        with torch.autograd.set_detect_anomaly(mode=config.torch.detect_anomaly, check_nan=config.torch.check_nan):
+        with torch.autograd.set_detect_anomaly(
+            mode=config.torch.detect_anomaly, check_nan=config.torch.check_nan
+        ):
             run(aim_run=aim_run, config=config)
     except Exception as error:
         _logger.exception(f"An error occurred during training: {error}")
