@@ -157,7 +157,7 @@ def train(
         global_state.step += 1
 
         aim_run.track(
-            value=loss.item(),
+            value=loss.float().item(),
             name="loss",
             epoch=global_state.epoch,
             step=global_state.step,
