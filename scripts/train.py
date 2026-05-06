@@ -209,10 +209,14 @@ def validate(
             preds = logits.sigmoid()
             loss = criterion(input=logits, target=target)
 
-        loss_metric.update(loss.cpu())
-        auroc_metric.update(preds=preds.cpu(), target=target.cpu())
-        h_sig.fill(preds[target == 1].cpu().float().numpy())
-        h_bkg.fill(preds[target == 0].cpu().float().numpy())
+        loss = loss.float().cpu()
+        preds = preds.float().cpu()
+        target = target.float().cpu()
+
+        loss_metric.update(loss)
+        auroc_metric.update(preds=preds, target=target)
+        h_sig.fill(preds[target == 1].numpy())
+        h_bkg.fill(preds[target == 0].numpy())
 
     # ---------------------------------------------------------------------------
     #
