@@ -186,8 +186,8 @@ def validate(
     # Metrics and histogram setup
     # ---------------------------------------------------------------------------
 
-    loss_metric = MeanMetric().to(device)
-    auroc_metric = BinaryAUROC().to(device)
+    loss_metric = MeanMetric()
+    auroc_metric = BinaryAUROC()
     h_sig = Hist.new.Reg(40, 0, 1).Double()
     h_bkg = h_sig.copy()
 
@@ -209,8 +209,8 @@ def validate(
             preds = logits.sigmoid()
             loss = criterion(input=logits, target=target)
 
-        loss_metric.update(loss)
-        auroc_metric.update(preds=preds, target=target)
+        loss_metric.update(loss.cpu())
+        auroc_metric.update(preds=preds.cpu(), target=target.cpu())
         h_sig.fill(preds[target == 1].cpu().float().numpy())
         h_bkg.fill(preds[target == 0].cpu().float().numpy())
 
