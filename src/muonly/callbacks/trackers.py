@@ -11,7 +11,6 @@ __al__ = ["MemoryTracker", "CUDAMemoryTracker"]
 
 
 class MemoryTracker:
-
     def __init__(
         self,
         output_dir: Path | None = None,
@@ -44,9 +43,7 @@ class MemoryTracker:
         df.to_csv(path, index=False)
 
 
-
 class CUDAMemoryTracker:
-
     def __init__(
         self,
         device: torch.device,
@@ -62,7 +59,9 @@ class CUDAMemoryTracker:
         if self.device.type == "cuda":
             self.track("initial")
         else:
-            self.logger.warning("CUDAMemoryTracker initialized on non-CUDA device. Memory tracking will be disabled.")
+            self.logger.warning(
+                "CUDAMemoryTracker initialized on non-CUDA device. Memory tracking will be disabled."
+            )
 
     def __del__(self):
         if self.device.type != "cuda":
@@ -106,5 +105,5 @@ class CUDAMemoryTracker:
         self.logger.info(log)
 
         self.logger.info(f"Writing CUDA memory summary to {path}...")
-        with path.open('w') as file:
+        with path.open("w") as file:
             file.write(log)

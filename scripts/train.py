@@ -177,25 +177,27 @@ def validate(
     amp_context: torch.autocast | nullcontext,
 ) -> dict[str, Any]:
     """ """
-    #---------------------------------------------------------------------------
+    # ---------------------------------------------------------------------------
     #
-    #---------------------------------------------------------------------------
+    # ---------------------------------------------------------------------------
     model.eval()
 
-    #---------------------------------------------------------------------------
+    # ---------------------------------------------------------------------------
     # Metrics and histogram setup
-    #---------------------------------------------------------------------------
+    # ---------------------------------------------------------------------------
 
     loss_metric = MeanMetric().to(device)
     auroc_metric = BinaryAUROC().to(device)
     h_sig = Hist.new.Reg(40, 0, 1).Double()
     h_bkg = h_sig.copy()
 
-    #---------------------------------------------------------------------------
+    # ---------------------------------------------------------------------------
     #
-    #---------------------------------------------------------------------------
+    # ---------------------------------------------------------------------------
 
-    for batch in tqdm.rich.tqdm(data_loader, desc="Evaluating", disable=(not config.misc.tqdm)):
+    for batch in tqdm.rich.tqdm(
+        data_loader, desc="Evaluating", disable=(not config.misc.tqdm)
+    ):
         batch = batch.to(device)
 
         with amp_context:
@@ -212,9 +214,9 @@ def validate(
         h_sig.fill(preds[target == 1].cpu().float().numpy())
         h_bkg.fill(preds[target == 0].cpu().float().numpy())
 
-    #---------------------------------------------------------------------------
+    # ---------------------------------------------------------------------------
     #
-    #---------------------------------------------------------------------------
+    # ---------------------------------------------------------------------------
     result = {}
     result["loss"] = loss_metric.compute().item()
     result["auroc"] = auroc_metric.compute().item()
@@ -231,8 +233,7 @@ def validate(
 
 
 def configure_model_in_keys(config: DictConfig) -> dict[str, str]:
-    """Configure the input keys for the model based on the data configuration.
-    """
+    """Configure the input keys for the model based on the data configuration."""
     in_key_list = []
     if config.data.tracker_track:
         in_key_list += ["tracker_track", "tracker_track_data_mask"]
@@ -311,17 +312,16 @@ def run(
     _logger.info(f"Model summary:\n{model_statistics}")
 
     with open(run_dir / "model-summary.txt", "w") as file:
-        file.write(
-            f"{model_statistics}\n\n"
-            f"Model architecture:\n{model}"
-        )
+        file.write(f"{model_statistics}\n\nModel architecture:\n{model}")
 
     # ---------------------------------------------------------------------------
     # Model compilation
     # FIXME: failed to compile the model with torch 2.10.0 on khu
     # ---------------------------------------------------------------------------
     if config.torch.compile:
-        _logger.warning("Model compilation might cause many issues. Make sure to test the compiled model thoroughly before using it for training.")
+        _logger.warning(
+            "Model compilation might cause many issues. Make sure to test the compiled model thoroughly before using it for training."
+        )
         _logger.info("Compiling model with torch.compile...")
         compiled_model = torch.compile(model, mode="reduce-overhead")
         _logger.info("Model compilation completed.")
@@ -484,9 +484,9 @@ def run(
         output_dir=ckpt_dir,
     )
 
-    #---------------------------------------------------------------------------
+    # ---------------------------------------------------------------------------
     # Training loop
-    #---------------------------------------------------------------------------
+    # ---------------------------------------------------------------------------
 
     cuda_memory_tracker.track("before_training_loop")
 
@@ -506,8 +506,8 @@ def run(
                 config=config,
                 amp_context=amp_context,
             )
-            memory_tracker.track(f'epoch_{epoch:06d}_train')
-            cuda_memory_tracker.track(f'epoch_{epoch:06d}_train')
+            memory_tracker.track(f"epoch_{epoch:06d}_train")
+            cuda_memory_tracker.track(f"epoch_{epoch:06d}_train")
 
         val_result = validate(
             model=td_model,
@@ -520,8 +520,8 @@ def run(
             amp_context=amp_context,
         )
 
-        memory_tracker.track(f'epoch_{epoch:06d}_val')
-        cuda_memory_tracker.track(f'epoch_{epoch:06d}_val')
+        memory_tracker.track(f"epoch_{epoch:06d}_val")
+        cuda_memory_tracker.track(f"epoch_{epoch:06d}_val")
 
         for key, value in val_result.items():
             aim_run.track(
@@ -560,6 +560,7 @@ def run(
 
     # TODO:
 
+
 @hydra.main(
     config_path="../config",
     config_name="main",
@@ -576,7 +577,9 @@ def main(config: DictConfig) -> None:
 
     try:
         if config.torch.detect_anomaly:
-            _logger.warning("PyTorch anomaly detection is enabled. This may significantly slow down training. Use with caution.")
+            _logger.warning(
+                "PyTorch anomaly detection is enabled. This may significantly slow down training. Use with caution."
+            )
 
         with torch.autograd.set_detect_anomaly(
             mode=config.torch.detect_anomaly, check_nan=config.torch.check_nan
