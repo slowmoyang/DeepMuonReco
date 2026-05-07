@@ -51,7 +51,7 @@ mh.style.use("CMS")
 # FIXME: better way to set project root for hydra
 os.environ["PROJECT_ROOT"] = str(Path(__file__).parents[1].resolve())
 
-_logger = logging.getLogger(__name__)
+_logger = logging.getLogger(Path(__file__).name)
 logging.basicConfig(level=logging.INFO)
 
 warnings.filterwarnings("ignore", category=TqdmExperimentalWarning)
