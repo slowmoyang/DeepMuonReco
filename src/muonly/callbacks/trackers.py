@@ -13,12 +13,6 @@ __all__ = ["MemoryTracker", "CUDAMemoryTracker"]
 
 
 
-@dataclass(frozen=True)
-class MemoryUsage:
-    tag: str
-    rss_bytes: int
-
-
 class Tracker(abc.ABC):
 
     def __init__(
@@ -44,7 +38,6 @@ class Tracker(abc.ABC):
     def write(self, path: Path):
         df = pd.DataFrame(self.log)
         df.to_csv(path, index=False)
-
 
 
 class MemoryTracker(Tracker):
@@ -82,13 +75,6 @@ class CUDAMemoryTracker(Tracker):
             output_dir=output_dir,
             log_file_name=log_file_name,
         )
-
-    def __del__(self):
-        if self.device.type != "cuda":
-            return
-        self.track("final")
-        self.write(self.output_dir / "cuda-memory.csv")
-        self.summarize(self.output_dir / "cuda-memory-summary.txt")
 
     def track(self, tag: str):
         if self.device.type != "cuda":
