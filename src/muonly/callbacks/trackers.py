@@ -1,67 +1,87 @@
 import os
 from pathlib import Path
 import logging
+from dataclasses import dataclass
+import abc
 import psutil
 import torch
 import pandas as pd
 import humanize
 
 
-__al__ = ["MemoryTracker", "CUDAMemoryTracker"]
+__all__ = ["MemoryTracker", "CUDAMemoryTracker"]
 
 
-class MemoryTracker:
+
+@dataclass(frozen=True)
+class MemoryUsage:
+    tag: str
+    rss_bytes: int
+
+
+class Tracker(abc.ABC):
+
     def __init__(
         self,
-        output_dir: Path | None = None,
+        output_dir: Path,
+        log_file_name: str,
     ) -> None:
         self.output_dir = output_dir
+        self.log_file_name = log_file_name
 
-        self.process = psutil.Process(os.getpid())
         self.logger = logging.getLogger(self.__class__.__name__)
+        self.log = []
+        self.track("tracking_start")
 
-        self.log: list[tuple[str, int]] = []
-
-        self.track("initial")
+    @abc.abstractmethod
+    def track(self, tag: str):
+        ...
 
     def __del__(self):
-        if self.output_dir is None:
-            return
-        self.track("final")
-        self.write(self.output_dir / "memory.csv")
-
-    def track(self, tag: str):
-        mem = self.process.memory_info().rss
-
-        self.log.append((tag, mem))
-
-        self.logger.info(f"{tag}: {humanize.naturalsize(mem, binary=True)}")
+        self.track("tracking_end")
+        self.write(self.output_dir / self.log_file_name)
 
     def write(self, path: Path):
-        df = pd.DataFrame(self.log, columns=["tag", "rss_bytes"])
-        self.logger.info(f"Writing memory log to {path}...")
+        df = pd.DataFrame(self.log)
         df.to_csv(path, index=False)
 
 
-class CUDAMemoryTracker:
+
+class MemoryTracker(Tracker):
+    def __init__(
+        self,
+        output_dir: Path,
+        log_file_name: str = "memory.csv",
+    ) -> None:
+        """
+        """
+        self.process = psutil.Process(os.getpid())
+        super().__init__(output_dir=output_dir, log_file_name=log_file_name)
+
+    def track(self, tag: str):
+        mem = self.process.memory_info().rss
+        self.log.append(dict(tag=tag, rss_bytes=mem))
+        self.logger.info(f"{tag}: {humanize.naturalsize(mem, binary=True)}")
+
+
+class CUDAMemoryTracker(Tracker):
     def __init__(
         self,
         device: torch.device,
         output_dir: Path,
+        log_file_name: str = "cuda-memory.csv",
     ):
         self.device = device
-        self.output_dir = output_dir
 
-        self.logger = logging.getLogger(self.__class__.__name__)
-
-        self.log: list[tuple[str, int, int]] = []
-
-        if self.device.type == "cuda":
-            self.track("initial")
-        else:
+        if self.device.type != "cuda":
             self.logger.warning(
                 "CUDAMemoryTracker initialized on non-CUDA device. Memory tracking will be disabled."
             )
+
+        super().__init__(
+            output_dir=output_dir,
+            log_file_name=log_file_name,
+        )
 
     def __del__(self):
         if self.device.type != "cuda":
@@ -77,17 +97,18 @@ class CUDAMemoryTracker:
         mem = torch.cuda.memory_allocated(device=self.device)
         max_mem = torch.cuda.max_memory_allocated(device=self.device)
 
-        self.log.append((tag, mem, max_mem))
+        self.log.append(dict(tag=tag, allocated_bytes=mem, max_allocated_bytes=max_mem))
 
         self.logger.info(
             f"{tag}: {humanize.naturalsize(mem, binary=True)} "
             f"(Peak: {humanize.naturalsize(max_mem, binary=True)})"
         )
 
-    def write(self, path: Path):
-        df = pd.DataFrame(self.log, columns=["tag", "allocated", "max_allocated"])
-        self.logger.info(f"Writing CUDA memory log to {path}...")
-        df.to_csv(path, index=False)
+    def __del__(self):
+        if self.device.type != "cuda":
+            return
+        super().__del__()
+        self.summarize(self.output_dir / "cuda-memory-summary.txt")
 
     def summarize(self, path: Path):
         if self.device.type != "cuda":
@@ -102,8 +123,6 @@ class CUDAMemoryTracker:
             f"{summary}"
         )
 
-        self.logger.info(log)
-
-        self.logger.info(f"Writing CUDA memory summary to {path}...")
+        self.logger.debug(f"Writing CUDA memory summary to {path}...")
         with path.open("w") as file:
             file.write(log)
