@@ -14,5 +14,5 @@ defaults:
   - _self_
   - mode: null
 
-exp: tracker_track_selection
+exp: main
 run: ${now:%y%m%d-%H%M%S}_${slug:2}
