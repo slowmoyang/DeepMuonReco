@@ -87,29 +87,19 @@ class GlobalState:
     epoch: int = 0
     val_loss: float = float("inf")
     val_auroc: float = 0.0
-    best_epoch: int = 0
-    best_val_loss: float = float("inf")
-    best_val_auroc: float = 0.0
 
     def state_dict(self):
         return asdict(self)
 
-    def update_epoch(self, loss: float, auroc: float):
+    def track_val_result(self, epoch: int, val_result: dict[str, Any]) -> None:
         """Update the best loss and AUROC if the current values are better."""
-        self.val_loss = loss
-        self.val_auroc = auroc
+        if epoch != self.epoch:
+            raise ValueError(
+                f"Epoch mismatch: current epoch is {self.epoch}, but got {epoch}."
+            )
 
-        if loss < self.best_val_loss:
-            self.best_epoch = self.epoch
-            self.best_val_loss = loss
-            self.best_val_auroc = auroc
-
-    def __str__(self):
-        return (
-            f"Epoch: {self.epoch}, Step: {self.step}, "
-            f"Val Loss: {self.val_loss:.4f}, Val AUROC: {self.val_auroc:.4f} "
-            f"(Best Epoch: {self.best_epoch}, Val Loss: {self.best_val_loss:.4f}, Val AUROC: {self.best_val_auroc:.4f})"
-        )
+        self.val_loss = val_result["loss"]
+        self.val_auroc = val_result["auroc"]
 
 
 def train(
@@ -267,8 +257,14 @@ def run(
     Returns:
         None
     """
+    # ---------------------------------------------------------------------------
+    # Run directory
+    # ---------------------------------------------------------------------------
     run_dir = Path(config.paths.run_dir)
 
+    # ---------------------------------------------------------------------------
+    # Setup resource trackers
+    # ---------------------------------------------------------------------------
     memory_tracker = MemoryTracker(
         output_dir=run_dir,
     )
@@ -492,7 +488,8 @@ def run(
     # Training loop
     # ---------------------------------------------------------------------------
 
-    cuda_memory_tracker.track("before_training_loop")
+    memory_tracker.track("training_loop_start")
+    cuda_memory_tracker.track("training_loop_start")
 
     for epoch in tqdm.rich.trange(0, 1 + config.optim.max_epochs, desc="Epoch"):
         global_state.epoch = epoch
@@ -536,19 +533,12 @@ def run(
                 context={"subset": "val"},
             )
         plt.close("all")
-
-        global_state.update_epoch(
-            loss=val_result["loss"],
-            auroc=val_result["auroc"],
-        )
-
+        global_state.track_val_result(epoch=epoch, val_result=val_result)
+        model_checkpoint.step(metric=val_result)
         _logger.info(global_state)
 
-        model_checkpoint.step(metric=val_result)
-
-    # ---------------------------------------------------------------------------
-    # Final evaluation and cleanup
-    # ---------------------------------------------------------------------------
+    memory_tracker.track("training_loop_end")
+    cuda_memory_tracker.track("training_loop_end")
 
     # ---------------------------------------------------------------------------
     # Load best checkpoint
