@@ -177,7 +177,7 @@ def validate(
     # ---------------------------------------------------------------------------
 
     loss_metric = MeanMetric()
-    auroc_metric = BinaryAUROC()
+    auroc_metric = BinaryAUROC(thresholds=1000)
     h_sig = Hist.new.Reg(40, 0, 1).Double()
     h_bkg = h_sig.copy()
 
@@ -201,7 +201,7 @@ def validate(
 
         loss = loss.float().cpu()
         preds = preds.float().cpu()
-        target = target.float().cpu()
+        target = target.long().cpu()
 
         loss_metric.update(loss)
         auroc_metric.update(preds=preds, target=target)
