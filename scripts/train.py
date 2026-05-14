@@ -44,6 +44,7 @@ from muonly.utils.optim import configure_lr_scheduler
 from muonly.callbacks import ModelCheckpoint
 from muonly.callbacks import MemoryTracker
 from muonly.callbacks import CUDAMemoryTracker
+from muonly.callbacks import TrackerCollection
 from muonly.utils.reproducibility import set_seed
 
 mh.style.use("CMS")
@@ -278,14 +279,17 @@ def run(
     # ---------------------------------------------------------------------------
     # Setup resource trackers
     # ---------------------------------------------------------------------------
-    memory_tracker = MemoryTracker(
+    trackers = TrackerCollection([])
+
+    trackers += MemoryTracker(
         output_dir=run_dir,
     )
 
-    cuda_memory_tracker = CUDAMemoryTracker(
-        device=device,
-        output_dir=run_dir,
-    )
+    if device.type == "cuda":
+        trackers += CUDAMemoryTracker(
+            device=device,
+            output_dir=run_dir,
+        )
 
     # ---------------------------------------------------------------------------
     # Save config
@@ -314,7 +318,7 @@ def run(
     # Instantiate model
     # ---------------------------------------------------------------------------
     model = instantiate(config.model)
-    memory_tracker.track("model_instantiated")
+    trackers.track("model_instantiated")
 
     # summarize model
     model_statistics = torchinfo.summary(model=model, verbose=False)
@@ -350,7 +354,7 @@ def run(
         ],
     )
 
-    memory_tracker.track("model_tensor_dict")
+    trackers.track("model_tensor_dict")
 
     # ---------------------------------------------------------------------------
     # Dataset
@@ -359,13 +363,13 @@ def run(
     _logger.info(f"{train_set=}")
     _logger.info(f"Number of training examples: {len(train_set)}")
 
-    memory_tracker.track("train_set_instantiated")
+    trackers.track("train_set_instantiated")
 
     val_set = instantiate(config.dataset.dataset)(**config.dataset.val)
     _logger.info(f"{val_set=}")
     _logger.info(f"Number of validation examples: {len(val_set)}")
 
-    memory_tracker.track("val_set_instantiated")
+    trackers.track("val_set_instantiated")
 
     # ---------------------------------------------------------------------------
     # Preprocessing
@@ -377,7 +381,7 @@ def run(
     train_set.apply_(preprocessing)
     val_set.apply_(preprocessing)
 
-    memory_tracker.track("preprocessing")
+    trackers.track("preprocessing")
 
     # ---------------------------------------------------------------------------
     # Data loaders
@@ -452,12 +456,12 @@ def run(
     # ---------------------------------------------------------------------------
     _logger.info("Moving model and criterion to device...")
 
-    cuda_memory_tracker.track("before_move_to_device")
+    trackers.track("before_move_to_device")
 
     model = model.to(device)
     criterion = criterion.to(device)
 
-    cuda_memory_tracker.track("after_move_to_device")
+    trackers.track("after_move_to_device")
 
     # ---------------------------------------------------------------------------
     # Mixed precision setup
@@ -497,8 +501,7 @@ def run(
     # Training loop
     # ---------------------------------------------------------------------------
 
-    memory_tracker.track("training_loop_start")
-    cuda_memory_tracker.track("training_loop_start")
+    trackers.track("training_loop_start")
 
     for epoch in tqdm.rich.trange(0, 1 + config.optim.max_epochs, desc="Epoch"):
         global_state.epoch = epoch
@@ -516,8 +519,7 @@ def run(
                 config=config,
                 amp_context=amp_context,
             )
-            memory_tracker.track(f"epoch_{epoch:06d}_train")
-            cuda_memory_tracker.track(f"epoch_{epoch:06d}_train")
+            trackers.track(f"epoch_{epoch:06d}_train")
 
         val_result = validate(
             model=td_model,
@@ -530,8 +532,7 @@ def run(
             amp_context=amp_context,
         )
 
-        memory_tracker.track(f"epoch_{epoch:06d}_val")
-        cuda_memory_tracker.track(f"epoch_{epoch:06d}_val")
+        trackers.track(f"epoch_{epoch:06d}_val")
 
         for key, value in val_result.items():
             aim_run.track(
@@ -546,8 +547,7 @@ def run(
         model_checkpoint.step(metric=val_result)
         _logger.info(global_state)
 
-    memory_tracker.track("training_loop_end")
-    cuda_memory_tracker.track("training_loop_end")
+    trackers.track("training_loop_end")
 
     # ---------------------------------------------------------------------------
     # Load best checkpoint

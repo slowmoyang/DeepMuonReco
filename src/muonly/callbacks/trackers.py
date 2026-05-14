@@ -9,7 +9,7 @@ import pandas as pd
 import humanize
 
 
-__all__ = ["MemoryTracker", "CUDAMemoryTracker"]
+__all__ = ["MemoryTracker", "CUDAMemoryTracker", "TrackerCollection"]
 
 
 
@@ -112,3 +112,23 @@ class CUDAMemoryTracker(Tracker):
         self.logger.debug(f"Writing CUDA memory summary to {path}...")
         with path.open("w") as file:
             file.write(log)
+
+
+class TrackerCollection:
+
+    def __init__(self, trackers: list[Tracker]):
+        self.trackers = trackers
+
+    def track(self, tag: str):
+        for tracker in self.trackers:
+            tracker.track(tag)
+
+    def append(self, tracker: Tracker):
+        self.trackers.append(tracker)
+
+    def __add__(self, tracker: Tracker):
+        self.append(tracker)
+
+    def __iadd__(self, tracker: Tracker):
+        self.append(tracker)
+        return self
