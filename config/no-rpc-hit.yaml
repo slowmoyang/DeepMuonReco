@@ -1,0 +1,21 @@
+# @package _global_
+
+defaults:
+  - main
+  - _self_
+  - override mode: null
+
+exp: no-rpc-hit
+
+data:
+  rpc_hit: null
+
+dataset:
+  dataset:
+    rpc_hit_features: null
+
+model:
+  rpc_hit_dim: null
+
+preprocessing:
+  rpc_hit: null
