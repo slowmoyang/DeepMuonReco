@@ -262,6 +262,19 @@ def run(
     # ---------------------------------------------------------------------------
     run_dir = Path(config.paths.run_dir)
 
+
+    # ---------------------------------------------------------------------------
+    #
+    # ---------------------------------------------------------------------------
+    device = torch.device(config.torch.device)
+    _logger.info(f"{device=}")
+    if device.type == "cuda":
+        _logger.info(f"GPU Name: {torch.cuda.get_device_name(device)}")
+    elif device.type == 'cpu':
+        _logger.warning("Using CPU for training. This may be very slow. Consider using a GPU if possible.")
+    else:
+        _logger.warning(f"Using device of type {device.type}. Make sure this is intentional and that the device is properly configured.")
+
     # ---------------------------------------------------------------------------
     # Setup resource trackers
     # ---------------------------------------------------------------------------
@@ -270,7 +283,7 @@ def run(
     )
 
     cuda_memory_tracker = CUDAMemoryTracker(
-        device=torch.device(config.torch.device),
+        device=device,
         output_dir=run_dir,
     )
 
@@ -296,10 +309,6 @@ def run(
 
     set_seed(config.torch.seed)
 
-    device = torch.device(config.torch.device)
-    _logger.info(f"{device=}")
-    if device.type == "cuda":
-        _logger.info(f"GPU Name: {torch.cuda.get_device_name(device)}")
 
     # ---------------------------------------------------------------------------
     # Instantiate model
