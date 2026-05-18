@@ -1,12 +1,6 @@
-# @package _global_
-
 exp: debug
 
 hydra:
   job_logging:
     root:
       level: DEBUG
-
-data:
-  num_workers: 0
-  pin_memory: false

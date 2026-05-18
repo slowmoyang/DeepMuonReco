@@ -1,9 +1,0 @@
-# @package _global_
-
-defaults:
-  - default
-
-exp: test
-
-trainer:
-  max_epochs: 10
