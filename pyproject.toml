@@ -34,6 +34,7 @@ dependencies = [
     "torchinfo>=1.8.0",
     "psutil>=7.2.2",
     "humanize>=4.15.0",
+    "rich-argparse>=1.8.0",
 ]
 
 [dependency-groups]
