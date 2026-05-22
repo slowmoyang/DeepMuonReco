@@ -1,7 +1,7 @@
 defaults:
   - default
 
-data_dir: /store/hep/users/slowmoyang/muonly/data/
+data_dir: /users/hep/joshin/store/muonly/whole/selection
 train_file: ${.data_dir}/train.h5
 val_file: ${.data_dir}/val.h5
 test_file: ${.data_dir}/test.h5

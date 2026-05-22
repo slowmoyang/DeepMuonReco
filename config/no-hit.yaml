@@ -1,7 +1,7 @@
 # @package _global_
 
 defaults:
-  - main
+  - default
   - _self_
   - override mode: null
 
@@ -11,16 +11,6 @@ data:
   rpc_hit: null
   gem_hit: null
 
-dataset:
-  dataset:
-    rpc_hit_features: null
-    gem_hit_features: null
-
-
 model:
   rpc_hit_dim: null
   gem_hit_dim: null
-
-preprocessing:
-  rpc_hit: null
-  gem_hit: null

@@ -1,6 +1,23 @@
-tracker_track: ${data.tracker_track.preprocessing}
-dt_segment: ${data.dt_segment.preprocessing}
-csc_segment: ${data.csc_segment.preprocessing}
-gem_segment: ${data.gem_segment.preprocessing}
-rpc_hit: ${data.rpc_hit.preprocessing}
-gem_hit: ${data.gem_hit.preprocessing}
+tracker_track:
+  _target_: muonly.data.transforms.Compose
+  transforms: ${data.tracker_track.preprocessing}
+
+dt_segment:
+  _target_: muonly.data.transforms.Compose
+  transforms: ${data.dt_segment.preprocessing}
+
+csc_segment:
+  _target_: muonly.data.transforms.Compose
+  transforms: ${data.csc_segment.preprocessing}
+
+gem_segment:
+  _target_: muonly.data.transforms.Compose
+  transforms: ${data.gem_segment.preprocessing}
+
+rpc_hit:
+  _target_: muonly.data.transforms.Compose
+  transforms: ${data.rpc_hit.preprocessing}
+
+gem_hit:
+  _target_: muonly.data.transforms.Compose
+  transforms: ${data.gem_hit.preprocessing}

@@ -7,6 +7,8 @@ import torch
 from torch.utils.data import Dataset
 from torch.nn.utils.rnn import pad_sequence
 from tensordict import TensorDict
+from omegaconf import DictConfig
+from omegaconf import OmegaConf
 import tqdm.rich
 from ..transforms import Compose
 
@@ -30,38 +32,47 @@ class TrackerTrackSelectionDataset(Dataset):
     def __init__(
         self,
         path: str | Path,
-        tracker_track_features: list[str],
-        dt_segment_features: list[str],
-        csc_segment_features: list[str],
-        gem_segment_features: list[str] | None,
-        rpc_hit_features: list[str] | None,
-        gem_hit_features: list[str] | None,
-        target_key: str = "track_is_trk_muon",
+        config: dict | DictConfig,
         max_events: int | float | None = None,
     ) -> None:
         super().__init__()
 
-        _logger.info(f"Loading data from {path} ...")
-        _logger.info(f"  - Tracker track features: {tracker_track_features}")
-        _logger.info(f"  - DT segment features: {dt_segment_features}")
-        _logger.info(f"  - CSC segment features: {csc_segment_features}")
-        _logger.info(f"  - GEM segment features: {gem_segment_features}")
-        _logger.info(f"  - RPC hit features: {rpc_hit_features}")
-        _logger.info(f"  - GEM hit features: {gem_hit_features}")
-        _logger.info(f"  - Target: {target_key}")
+        if isinstance(config, DictConfig):
+            config = OmegaConf.to_container(cfg=config, resolve=True)  # type: ignore
+        if not isinstance(config, dict):
+            raise TypeError("config must be a dict or DictConfig.")
 
         path = Path(path)
 
-        _logger.info(f"{path.suffix} file format detected.")
+        _logger.debug(f"{path.suffix} file format detected.")
         if path.suffix == ".root":
             loader = self.from_root
         elif path.suffix in [".h5", ".hdf5"]:
             loader = self.from_hdf5
         else:
             raise ValueError(f"Unsupported file format: {path.suffix}")
-        _logger.info(f"Using {loader.__name__} to load the data.")
+        _logger.debug(f"Using {loader.__name__} to load the data.")
 
-        _logger.info(f"Loading examples from {path} ...")
+        def get_features(config, key):
+            if key not in config or config[key] is None:
+                return None
+            return config[key].get("features", None)
+
+        tracker_track_features = get_features(config, "tracker_track")
+        dt_segment_features = get_features(config, "dt_segment")
+        csc_segment_features = get_features(config, "csc_segment")
+        gem_segment_features = get_features(config, "gem_segment")
+        rpc_hit_features = get_features(config, "rpc_hit")
+        gem_hit_features = get_features(config, "gem_hit")
+
+        if tracker_track_features is None:
+            raise ValueError("tracker_track_features must be specified in the config.")
+        if dt_segment_features is None:
+            raise ValueError("dt_segment_features must be specified in the config.")
+        if csc_segment_features is None:
+            raise ValueError("csc_segment_features must be specified in the config.")
+
+        _logger.debug(f"Loading examples from {path} ...")
         self.example_list = loader(
             path=path,
             tracker_track_features=tracker_track_features,
@@ -70,7 +81,7 @@ class TrackerTrackSelectionDataset(Dataset):
             gem_segment_features=gem_segment_features,
             rpc_hit_features=rpc_hit_features,
             gem_hit_features=gem_hit_features,
-            target_key=target_key,
+            target_key=config["tracker_track"]["target"],
             max_events=max_events,
         )
         _logger.info(f"Loaded {len(self.example_list)} examples from {path}.")
@@ -230,15 +241,13 @@ class TrackerTrackSelectionDataset(Dataset):
 
     @classmethod
     def collate(cls, example_list: list[TensorDict]) -> TensorDict:
-        keys = example_list[0].sorted_keys
         batch_dict = {}
-        for key in keys:
+        for key in example_list[0].sorted_keys:
             tensors = [example[key] for example in example_list]
             padded = pad_sequence(tensors, batch_first=True, padding_value=0)
             batch_dict[key] = padded
-            if (
-                key != "target"
-            ):  # we can use tracker_track_data_mask for target (tracker_track_target)
+            # we can use tracker_track_data_mask for target (tracker_track_target)
+            if key != "target":
                 lengths = torch.tensor([t.shape[0] for t in tensors])
                 max_len = padded.shape[1]
                 mask = torch.arange(max_len).unsqueeze(0) < lengths.unsqueeze(1)

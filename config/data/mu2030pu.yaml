@@ -1,40 +1,47 @@
 # preprocessing parameters are determined from mu2030pu
 
-target_key: track_is_trk_muon
+train_max_events: null
+val_max_events: null
+test_max_events: null
+batch_size: 64
+eval_batch_size: ${.batch_size}
+num_workers: 0
+pin_memory: false
 
 tracker_track:
   features: [px, py, pz, vx, vy, vz, charge]
   dim: ${len:${.features}}
   preprocessing:
-  - _target_: muonly.data.transforms.SignedLog1p
-    index: [0, 1, 2, 3, 4, 5]
-  - _target_: muonly.data.transforms.MinMaxScaling
-    input_min: [-14.243, -14.302, -15.286, -4.678, -4.946, -6.193, -1.000]
-    input_max: [13.967, 12.497, 14.909, 5.152, 3.461, 5.638, 1.000]
+    - _target_: muonly.data.transforms.SignedLog1p
+      index: [0, 1, 2, 3, 4, 5]
+    - _target_: muonly.data.transforms.MinMaxScaling
+      input_min: [-14.243, -14.302, -15.286, -4.678, -4.946, -6.193, -1]
+      input_max: [+13.967, +12.497, +14.909, +5.152, +3.461, +5.638, +1]
+  target: track_is_trk_muon
 
 dt_segment:
   features: [pos_x, pos_y, pos_z, dir_x, dir_y, dir_z]
   dim: ${len:${.features}}
   preprocessing:
   - _target_: muonly.data.transforms.MinMaxScaling
-    input_min: [-787.279, -720.460, -652.168, -1.000, -1.000, -0.957]
-    input_max: [779.118, 720.495, 652.156, 1.000, 1.000, 0.958]
+    input_min: [-787.279, -720.460, -652.168, -1, -1, -1]
+    input_max: [+779.118, +720.495, +652.156, +1, +1, +1]
 
 csc_segment:
   features: [pos_x, pos_y, pos_z, dir_x, dir_y, dir_z]
   dim: ${len:${.features}}
   preprocessing:
   - _target_: muonly.data.transforms.MinMaxScaling
-    input_min: [-687.410, -686.932, -1037.543, -0.999, -0.997, -1.000]
-    input_max: [685.690, 685.244, 1037.743, 0.998, 0.999, 1.000]
+    input_min: [-687.410, -686.932, -1037.543, -1, -1, -1]
+    input_max: [+685.690, +685.244, +1037.743, +1, +1, +1]
 
 gem_segment:
   features: [pos_x, pos_y, pos_z, dir_x, dir_y, dir_z]
   dim: ${len:${.features}}
   preprocessing:
   - _target_: muonly.data.transforms.MinMaxScaling
-    input_min: [-142.873, -144.459, -538.790, -0.844, -0.843, -1.000]
-    input_max: [142.960, 144.926, 538.790, 0.831, 0.838, 1.000]
+    input_min: [-142.873, -144.459, -538.790, -1, -1, -1]
+    input_max: [+142.960, +144.926, +538.790, +1, +1, +1]
 
 rpc_hit:
   features: [pos_x, pos_y, pos_z]
@@ -42,7 +49,7 @@ rpc_hit:
   preprocessing:
   - _target_: muonly.data.transforms.MinMaxScaling
     input_min: [-754.477, -704.550, -1066.155]
-    input_max: [754.477, 704.550, 1066.155]
+    input_max: [+754.477, +704.550, +1066.155]
 
 gem_hit:
   features: [pos_x, pos_y, pos_z]
@@ -50,4 +57,4 @@ gem_hit:
   preprocessing:
   - _target_: muonly.data.transforms.MinMaxScaling
     input_min: [-312.149, -312.149, -799.551]
-    input_max: [312.149, 312.149, 799.551]
+    input_max: [+312.149, +312.149, +799.551]

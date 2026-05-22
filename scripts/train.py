@@ -38,8 +38,10 @@ from hist import Hist
 import matplotlib.pyplot as plt
 import mplhep as mh
 
-from muonly.data.transforms import Compose
-from muonly.utils.optim import get_parameter_groups
+from muonly.data.datasets import TrackerTrackSelectionDataset
+from muonly.data.utils import configure_model_in_keys
+from muonly.data.transforms.utils import configure_preprocessing
+from muonly.utils.optim import configure_optimizer
 from muonly.utils.optim import configure_lr_scheduler
 from muonly.callbacks import ModelCheckpoint
 from muonly.callbacks import MemoryTracker
@@ -49,9 +51,16 @@ from muonly.utils.reproducibility import set_seed
 
 mh.style.use("CMS")
 
+# ===============================================================================
+#
+# ===============================================================================
+
 # FIXME: better way to set project root for hydra
 os.environ["PROJECT_ROOT"] = str(Path(__file__).parents[1].resolve())
 
+# ===============================================================================
+# logging
+# ===============================================================================
 _logger = logging.getLogger(Path(__file__).name)
 logging.basicConfig(level=logging.INFO)
 
@@ -59,6 +68,10 @@ warnings.filterwarnings("ignore", category=TqdmExperimentalWarning)
 
 for name in ["matplotlib", "PIL", "aim", "h5py", "filelock"]:
     logging.getLogger(name).setLevel(logging.CRITICAL)
+
+# ===============================================================================
+# resolvers
+# ===============================================================================
 
 OmegaConf.register_new_resolver(
     name="slug",
@@ -79,6 +92,10 @@ OmegaConf.register_new_resolver(
     resolver=len,
 )
 
+# ===============================================================================
+#
+# ===============================================================================
+
 
 @dataclass(repr=True)
 class GlobalState:
@@ -86,21 +103,14 @@ class GlobalState:
 
     step: int = 0
     epoch: int = 0
-    val_loss: float = float("inf")
-    val_auroc: float = 0.0
 
     def state_dict(self):
         return asdict(self)
 
-    def track_val_result(self, epoch: int, val_result: dict[str, Any]) -> None:
-        """Update the best loss and AUROC if the current values are better."""
-        if epoch != self.epoch:
-            raise ValueError(
-                f"Epoch mismatch: current epoch is {self.epoch}, but got {epoch}."
-            )
 
-        self.val_loss = val_result["loss"]
-        self.val_auroc = val_result["auroc"]
+# ===============================================================================
+#
+# ===============================================================================
 
 
 def train(
@@ -114,6 +124,7 @@ def train(
     config: DictConfig,
     amp_context: torch.autocast | nullcontext,
     aim_run: aim.Run,
+    trackers: TrackerCollection,
 ) -> None:
     """ """
     model.train()
@@ -124,7 +135,7 @@ def train(
         disable=(not config.misc.tqdm),
     )
 
-    for batch in progress_bar:
+    for batch_idx, batch in enumerate(progress_bar):
         batch = batch.to(device)
 
         with amp_context:
@@ -138,11 +149,14 @@ def train(
 
         loss.backward()
         clip_grad_norm_(
-            parameters=model.parameters(),
-            max_norm=config.optim.max_grad_norm,
+            parameters=model.parameters(), max_norm=config.optim.max_grad_norm
         )
         optimizer.step()
+        if batch_idx % 100 == 0:
+            trackers.track("optimizer_step")
         optimizer.zero_grad()
+        if batch_idx % 100 == 0:
+            trackers.track("optimizer_zero_grad")
         lr_scheduler.step()
 
         global_state.step += 1
@@ -163,8 +177,6 @@ def validate(
     data_loader: DataLoader,
     device: torch.device,
     config: DictConfig,
-    global_state: GlobalState,
-    aim_run: aim.Run,
     amp_context: torch.autocast | nullcontext,
 ) -> dict[str, Any]:
     """ """
@@ -227,43 +239,6 @@ def validate(
     return result
 
 
-def configure_model_in_keys(config: DictConfig) -> dict[str, str]:
-    """Configure the input keys for the model based on the data configuration."""
-    in_key_list = []
-    if config.data.tracker_track:
-        in_key_list += ["tracker_track", "tracker_track_data_mask"]
-    else:
-        raise ValueError("Tracker track data is required for the model. Please enable it in the config.")
-
-    if config.data.dt_segment:
-        in_key_list += ["dt_segment", "dt_segment_data_mask"]
-    else:
-        _logger.warning("DT segment data is disabled. Make sure this is intentional and that the model can handle the absence of this data.")
-
-    if config.data.csc_segment:
-        in_key_list += ["csc_segment", "csc_segment_data_mask"]
-    else:
-        _logger.warning("CSC segment data is disabled. Make sure this is intentional and that the model can handle the absence of this data.")
-
-    if config.data.gem_segment:
-        in_key_list += ["gem_segment", "gem_segment_data_mask"]
-    else:
-        _logger.info("GEM segment data is disabled. This is fine as long as the model is designed to work without it.")
-
-    if config.data.rpc_hit:
-        in_key_list += ["rpc_hit", "rpc_hit_data_mask"]
-    else:
-        _logger.info("RPC hit data is disabled. This is fine as long as the model is designed to work without it.")
-
-    if config.data.gem_hit:
-        in_key_list += ["gem_hit", "gem_hit_data_mask"]
-    else:
-        _logger.info("GEM hit data is disabled. This is fine as long as the model is designed to work without it.")
-
-    in_keys = {each: each for each in in_key_list}
-    return in_keys
-
-
 def run(
     aim_run: aim.Run,
     config: DictConfig,
@@ -280,33 +255,31 @@ def run(
     # ---------------------------------------------------------------------------
     run_dir = Path(config.paths.run_dir)
 
-
     # ---------------------------------------------------------------------------
-    #
+    # Device setup
     # ---------------------------------------------------------------------------
     device = torch.device(config.torch.device)
+
     _logger.info(f"{device=}")
+
     if device.type == "cuda":
         _logger.info(f"GPU Name: {torch.cuda.get_device_name(device)}")
-    elif device.type == 'cpu':
-        _logger.warning("Using CPU for training. This may be very slow. Consider using a GPU if possible.")
+    elif device.type == "cpu":
+        _logger.warning(
+            "Using CPU for training. This may be very slow. Consider using a GPU if possible."
+        )
     else:
-        _logger.warning(f"Using device of type {device.type}. Make sure this is intentional and that the device is properly configured.")
+        _logger.warning(
+            f"Using device of type {device.type}. Make sure this is intentional and that the device is properly configured."
+        )
 
     # ---------------------------------------------------------------------------
     # Setup resource trackers
     # ---------------------------------------------------------------------------
-    trackers = TrackerCollection([])
-
-    trackers += MemoryTracker(
-        output_dir=run_dir,
-    )
-
+    trackers = TrackerCollection()
+    trackers += MemoryTracker(output_dir=run_dir)
     if device.type == "cuda":
-        trackers += CUDAMemoryTracker(
-            device=device,
-            output_dir=run_dir,
-        )
+        trackers += CUDAMemoryTracker(device=device, output_dir=run_dir)
 
     # ---------------------------------------------------------------------------
     # Save config
@@ -329,7 +302,6 @@ def run(
         torch.set_num_interop_threads(config.torch.num_interop_threads)
 
     set_seed(config.torch.seed)
-
 
     # ---------------------------------------------------------------------------
     # Instantiate model
@@ -370,30 +342,31 @@ def run(
             "logits",
         ],
     )
-
     trackers.track("model_tensor_dict")
 
     # ---------------------------------------------------------------------------
     # Dataset
     # ---------------------------------------------------------------------------
-    train_set = instantiate(config.dataset.dataset)(**config.dataset.train)
-    _logger.info(f"{train_set=}")
+    train_set = TrackerTrackSelectionDataset(
+        path=config.paths.train_file,
+        config=config.data,
+        max_events=config.data.train_max_events,
+    )
     _logger.info(f"Number of training examples: {len(train_set)}")
-
     trackers.track("train_set_instantiated")
 
-    val_set = instantiate(config.dataset.dataset)(**config.dataset.val)
-    _logger.info(f"{val_set=}")
+    val_set = TrackerTrackSelectionDataset(
+        path=config.paths.val_file,
+        config=config.data,
+        max_events=config.data.val_max_events,
+    )
     _logger.info(f"Number of validation examples: {len(val_set)}")
-
     trackers.track("val_set_instantiated")
 
     # ---------------------------------------------------------------------------
     # Preprocessing
     # ---------------------------------------------------------------------------
-    preprocessing = {
-        key: Compose(instantiate(value)) for key, value in config.preprocessing.items()
-    }
+    preprocessing = configure_preprocessing(config.data)
 
     train_set.apply_(preprocessing)
     val_set.apply_(preprocessing)
@@ -403,14 +376,14 @@ def run(
     # ---------------------------------------------------------------------------
     # Data loaders
     # ---------------------------------------------------------------------------
-    pin_memory = config.data_loader.pin_memory and (device.type == "cuda")
+    pin_memory = config.data.pin_memory and (device.type == "cuda")
     _logger.info(f"{pin_memory=}")
 
     train_loader = DataLoader(
         dataset=train_set,
-        batch_size=config.data_loader.batch_size,
+        batch_size=config.data.batch_size,
         shuffle=True,
-        num_workers=config.data_loader.num_workers,
+        num_workers=config.data.num_workers,
         collate_fn=train_set.collate,
         pin_memory=pin_memory,
         drop_last=True,  # drop last to avoid issues stem from small non-representative batches during training
@@ -422,9 +395,9 @@ def run(
 
     val_loader = DataLoader(
         dataset=val_set,
-        batch_size=config.data_loader.eval_batch_size,
+        batch_size=config.data.eval_batch_size,
         shuffle=False,  # no shuffling for evaluation
-        num_workers=config.data_loader.num_workers,
+        num_workers=config.data.num_workers,
         collate_fn=val_set.collate,
         pin_memory=pin_memory,
         drop_last=False,  # we want to validate on all validation examples
@@ -442,16 +415,12 @@ def run(
     # ---------------------------------------------------------------------------
     # Optimization
     # ---------------------------------------------------------------------------
-    optimizer = AdamW(
-        params=get_parameter_groups(
-            model=model,
-            weight_decay=config.optim.weight_decay,
-        ),
+    optimizer = configure_optimizer(
+        model=model,
         lr=config.optim.lr,
-        betas=(
-            config.optim.beta1,
-            config.optim.beta2,
-        ),
+        weight_decay=config.optim.weight_decay,
+        beta1=config.optim.beta1,
+        beta2=config.optim.beta2,
     )
     _logger.info(f"{optimizer=}")
 
@@ -471,7 +440,7 @@ def run(
     # ---------------------------------------------------------------------------
     # GPU setup
     # ---------------------------------------------------------------------------
-    _logger.info("Moving model and criterion to device...")
+    _logger.debug("Moving model and criterion to device...")
 
     trackers.track("before_move_to_device")
 
@@ -535,6 +504,7 @@ def run(
                 aim_run=aim_run,
                 config=config,
                 amp_context=amp_context,
+                trackers=trackers,
             )
             trackers.track(f"epoch_{epoch:06d}_train")
 
@@ -544,11 +514,8 @@ def run(
             data_loader=val_loader,
             device=device,
             config=config,
-            global_state=global_state,
-            aim_run=aim_run,
             amp_context=amp_context,
         )
-
         trackers.track(f"epoch_{epoch:06d}_val")
 
         for key, value in val_result.items():
@@ -560,7 +527,6 @@ def run(
                 context={"subset": "val"},
             )
         plt.close("all")
-        global_state.track_val_result(epoch=epoch, val_result=val_result)
         model_checkpoint.step(metric=val_result)
         _logger.info(global_state)
 
@@ -570,9 +536,9 @@ def run(
     # Load best checkpoint
     # ---------------------------------------------------------------------------
 
-    best_checkpoint = torch.load(model_checkpoint.best_path)
-    model.load_state_dict(best_checkpoint["model"])
-    del best_checkpoint
+    # checkpoint = torch.load(model_checkpoint.best_path)
+    # model.load_state_dict(checkpoint["model"])
+    # del checkpoint
 
     # ---------------------------------------------------------------------------
     # Run final evaluation on validation set with best model checkpoint
@@ -583,7 +549,7 @@ def run(
 
 @hydra.main(
     config_path="../config",
-    config_name="main",
+    config_name="no-hit",
     version_base=None,
 )
 def main(config: DictConfig) -> None:
@@ -598,7 +564,8 @@ def main(config: DictConfig) -> None:
     try:
         if config.torch.detect_anomaly:
             _logger.warning(
-                "PyTorch anomaly detection is enabled. This may significantly slow down training. Use with caution."
+                "PyTorch anomaly detection is enabled. This may significantly "
+                "slow down training. Use with caution."
             )
 
         with torch.autograd.set_detect_anomaly(

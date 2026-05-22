@@ -1,8 +1,8 @@
 import os
 from pathlib import Path
 import logging
-from dataclasses import dataclass
 import abc
+import resource
 import psutil
 import torch
 import pandas as pd
@@ -12,9 +12,7 @@ import humanize
 __all__ = ["MemoryTracker", "CUDAMemoryTracker", "TrackerCollection"]
 
 
-
 class Tracker(abc.ABC):
-
     def __init__(
         self,
         output_dir: Path,
@@ -28,8 +26,7 @@ class Tracker(abc.ABC):
         self.track("tracking_start")
 
     @abc.abstractmethod
-    def track(self, tag: str):
-        ...
+    def track(self, tag: str): ...
 
     def __del__(self):
         self.track("tracking_end")
@@ -46,13 +43,13 @@ class MemoryTracker(Tracker):
         output_dir: Path,
         log_file_name: str = "memory.csv",
     ) -> None:
-        """
-        """
+        """ """
         self.process = psutil.Process(os.getpid())
         super().__init__(output_dir=output_dir, log_file_name=log_file_name)
 
     def track(self, tag: str):
         mem = self.process.memory_info().rss
+
         self.log.append(dict(tag=tag, rss_bytes=mem))
         self.logger.info(f"{tag}: {humanize.naturalsize(mem, binary=True)}")
 
@@ -115,9 +112,8 @@ class CUDAMemoryTracker(Tracker):
 
 
 class TrackerCollection:
-
-    def __init__(self, trackers: list[Tracker]):
-        self.trackers = trackers
+    def __init__(self, trackers: list[Tracker] | None = None):
+        self.trackers = trackers or []
 
     def track(self, tag: str):
         for tracker in self.trackers:

@@ -3,13 +3,10 @@
 defaults:
   - debug
 
-dataset:
-  train:
-    max_events: 1024
-  val:
-    max_events: 1024
-  test:
-    max_events: 1024
+data:
+  train_max_events: 1024
+  val_max_events: 1024
+  test_max_events: 1024
 
 optim:
   max_epochs: 2

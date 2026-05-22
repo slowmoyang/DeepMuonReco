@@ -1,4 +1,0 @@
-batch_size: 64
-eval_batch_size: ${.batch_size}
-num_workers: 0
-pin_memory: false

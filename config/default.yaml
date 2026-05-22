@@ -3,9 +3,6 @@
 defaults:
   - model: latent_attention
   - data: mu2030pu
-  - dataset: default
-  - data_loader: default
-  - preprocessing: default
   - optim: default
   - paths: khu
   - torch: default
@@ -14,5 +11,5 @@ defaults:
   - _self_
   - mode: null
 
-exp: main
+exp: tts
 run: ${now:%y%m%d-%H%M%S}_${slug:2}

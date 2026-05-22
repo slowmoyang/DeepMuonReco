@@ -3,6 +3,7 @@ import torch.nn as nn
 from torch.nn.modules.conv import _ConvNd
 from torch.nn.modules.batchnorm import _BatchNorm
 from torch.optim import Optimizer
+from torch.optim import AdamW
 from torch.optim.lr_scheduler import CosineAnnealingLR
 from torch.optim.lr_scheduler import LinearLR
 from torch.optim.lr_scheduler import SequentialLR
@@ -13,6 +14,7 @@ _logger = logging.getLogger(__name__)
 
 __all__ = [
     "get_parameter_groups",
+    "configure_optimizer",
     "configure_lr_scheduler",
 ]
 
@@ -92,6 +94,20 @@ def get_parameter_groups(
         {"params": decay_param_list, "weight_decay": weight_decay},
         {"params": no_decay_param_list, "weight_decay": 0.0},
     ]
+
+
+def configure_optimizer(model, lr, weight_decay, beta1, beta2):
+    return AdamW(
+        params=get_parameter_groups(
+            model=model,
+            weight_decay=weight_decay,
+        ),
+        lr=lr,
+        betas=(
+            beta1,
+            beta2,
+        ),
+    )
 
 
 def configure_lr_scheduler(
