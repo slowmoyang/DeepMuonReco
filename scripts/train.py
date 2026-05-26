@@ -124,7 +124,6 @@ def train(
     config: DictConfig,
     amp_context: torch.autocast | nullcontext,
     aim_run: aim.Run,
-    trackers: TrackerCollection,
 ) -> None:
     """ """
     model.train()
@@ -152,11 +151,7 @@ def train(
             parameters=model.parameters(), max_norm=config.optim.max_grad_norm
         )
         optimizer.step()
-        if batch_idx % 100 == 0:
-            trackers.track("optimizer_step")
         optimizer.zero_grad()
-        if batch_idx % 100 == 0:
-            trackers.track("optimizer_zero_grad")
         lr_scheduler.step()
 
         global_state.step += 1
@@ -188,9 +183,15 @@ def validate(
     # ---------------------------------------------------------------------------
     # Metrics and histogram setup
     # ---------------------------------------------------------------------------
+    metric_dict = {
+        "loss": MeanMetric(),
+        "loss_low_pt": MeanMetric(),
+        "loss_high_pt": MeanMetric(),
+        "auroc": BinaryAUROC(thresholds=1000),
+        "auroc_low_pt": BinaryAUROC(thresholds=1000),
+        "auroc_high_pt": BinaryAUROC(thresholds=1000),
+    }
 
-    loss_metric = MeanMetric()
-    auroc_metric = BinaryAUROC(thresholds=1000)
     h_sig = Hist.new.Reg(40, 0, 1).Double()
     h_bkg = h_sig.copy()
 
@@ -215,18 +216,29 @@ def validate(
         loss = loss.float().cpu()
         preds = preds.float().cpu()
         target = target.long().cpu()
+        pt = batch["tracker_track_pt"][mask].float().cpu()
 
-        loss_metric.update(loss)
-        auroc_metric.update(preds=preds, target=target)
+        low_pt = pt < 3
+        high_pt = pt >= 3
+
+        metric_dict["loss"].update(loss)
+        metric_dict["loss_low_pt"].update(loss[low_pt])
+        metric_dict["loss_high_pt"].update(loss[high_pt])
+        metric_dict["auroc"].update(preds=preds, target=target)
+        metric_dict["auroc_low_pt"].update(preds=preds[low_pt], target=target[low_pt])
+        metric_dict["auroc_high_pt"].update(
+            preds=preds[high_pt], target=target[high_pt]
+        )
         h_sig.fill(preds[target == 1].numpy())
         h_bkg.fill(preds[target == 0].numpy())
 
     # ---------------------------------------------------------------------------
     #
     # ---------------------------------------------------------------------------
-    result = {}
-    result["loss"] = loss_metric.compute().item()
-    result["auroc"] = auroc_metric.compute().item()
+    result = {
+        name: metric.compute().item()
+        for name, metric in metric_dict.items()
+    }
 
     # NOTE:
     fig, ax = plt.subplots()
@@ -350,18 +362,18 @@ def run(
     train_set = TrackerTrackSelectionDataset(
         path=config.paths.train_file,
         config=config.data,
-        max_events=config.data.train_max_events,
+        max_events=config.data_loading.train_max_events,
     )
-    _logger.info(f"Number of training examples: {len(train_set)}")
     trackers.track("train_set_instantiated")
+    _logger.info(f"Number of training examples: {len(train_set)}")
 
     val_set = TrackerTrackSelectionDataset(
         path=config.paths.val_file,
         config=config.data,
-        max_events=config.data.val_max_events,
+        max_events=config.data_loading.val_max_events,
     )
-    _logger.info(f"Number of validation examples: {len(val_set)}")
     trackers.track("val_set_instantiated")
+    _logger.info(f"Number of validation examples: {len(val_set)}")
 
     # ---------------------------------------------------------------------------
     # Preprocessing
@@ -369,35 +381,34 @@ def run(
     preprocessing = configure_preprocessing(config.data)
 
     train_set.apply_(preprocessing)
-    val_set.apply_(preprocessing)
+    trackers.track("preprocessing training set completed")
 
-    trackers.track("preprocessing")
+    val_set.apply_(preprocessing)
+    trackers.track("preprocessing validation set completed")
 
     # ---------------------------------------------------------------------------
     # Data loaders
     # ---------------------------------------------------------------------------
-    pin_memory = config.data.pin_memory and (device.type == "cuda")
+    pin_memory = config.data_loading.pin_memory and (device.type == "cuda")
     _logger.info(f"{pin_memory=}")
 
     train_loader = DataLoader(
         dataset=train_set,
-        batch_size=config.data.batch_size,
+        batch_size=config.data_loading.batch_size,
         shuffle=True,
-        num_workers=config.data.num_workers,
+        num_workers=config.data_loading.num_workers,
         collate_fn=train_set.collate,
         pin_memory=pin_memory,
         drop_last=True,  # drop last to avoid issues stem from small non-representative batches during training
-        generator=torch.Generator().manual_seed(
-            config.torch.seed
-        ),  # ensure reproducibility when shuffling
+        generator=torch.Generator().manual_seed(config.torch.seed),
     )
     _logger.info(f"Number of training batches: {len(train_loader)}")
 
     val_loader = DataLoader(
         dataset=val_set,
-        batch_size=config.data.eval_batch_size,
+        batch_size=config.data_loading.eval_batch_size,
         shuffle=False,  # no shuffling for evaluation
-        num_workers=config.data.num_workers,
+        num_workers=config.data_loading.num_workers,
         collate_fn=val_set.collate,
         pin_memory=pin_memory,
         drop_last=False,  # we want to validate on all validation examples
@@ -490,9 +501,11 @@ def run(
     trackers.track("training_loop_start")
 
     for epoch in tqdm.rich.trange(0, 1 + config.optim.max_epochs, desc="Epoch"):
+        _logger.info(f"Starting epoch {epoch}/{config.optim.max_epochs}...")
         global_state.epoch = epoch
 
         if epoch >= 1:
+            _logger.info("Running training...")
             train(
                 model=td_model,
                 criterion=criterion,
@@ -504,10 +517,11 @@ def run(
                 aim_run=aim_run,
                 config=config,
                 amp_context=amp_context,
-                trackers=trackers,
             )
+            _logger.info("Training completed.")
             trackers.track(f"epoch_{epoch:06d}_train")
 
+        _logger.info("Running validation...")
         val_result = validate(
             model=td_model,
             criterion=criterion,
@@ -516,8 +530,10 @@ def run(
             config=config,
             amp_context=amp_context,
         )
+        _logger.info("Validation completed.")
         trackers.track(f"epoch_{epoch:06d}_val")
 
+        _logger.debug(f'logging validation results to Aim and checkpointing if necessary...')
         for key, value in val_result.items():
             aim_run.track(
                 value=value,
@@ -528,7 +544,11 @@ def run(
             )
         plt.close("all")
         model_checkpoint.step(metric=val_result)
-        _logger.info(global_state)
+        _logger.info(f'{global_state}: {val_result}')
+
+        _logger.debug('logging completed')
+
+        _logger.info(f"Epoch {epoch} completed.")
 
     trackers.track("training_loop_end")
 

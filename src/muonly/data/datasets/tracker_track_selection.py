@@ -153,45 +153,49 @@ class TrackerTrackSelectionDataset(Dataset):
 
             chunk = {}
 
+            slicing = slice(None, stop)
+
             # NOTE: reconstructed tracker tracks
             chunk["tracker_track"] = [
-                file[f"track_{each}"][:stop]  # type: ignore
+                file[f"track_{each}"][slicing]  # type: ignore
                 for each in tracker_track_features
             ]
 
+            chunk['tracker_track_pt'] = file['track_pt'][slicing]  # type: ignore
+
             # NOTE: reconstructed segments in the muon system
             chunk["dt_segment"] = [
-                file[f"dt_seg_{each}"][:stop]  # type: ignore
+                file[f"dt_seg_{each}"][slicing]  # type: ignore
                 for each in dt_segment_features
             ]
 
             chunk["csc_segment"] = [
-                file[f"csc_seg_{each}"][:stop]  # type: ignore
+                file[f"csc_seg_{each}"][slicing]  # type: ignore
                 for each in csc_segment_features
             ]
 
             if gem_segment_features is not None:
                 chunk["gem_segment"] = [
-                    file[f"gem_seg_{each}"][:stop]  # type: ignore
+                    file[f"gem_seg_{each}"][slicing]  # type: ignore
                     for each in gem_segment_features
                 ]
 
             # NOTE: reconstructed hits in the muon system
             if rpc_hit_features is not None:
                 chunk["rpc_hit"] = [
-                    file[f"rpc_hit_{each}"][:stop]  # type: ignore
+                    file[f"rpc_hit_{each}"][slicing]  # type: ignore
                     for each in rpc_hit_features
                 ]
 
             if gem_hit_features is not None:
                 chunk["gem_hit"] = [
-                    file[f"gem_hit_{each}"][:stop]  # type: ignore
+                    file[f"gem_hit_{each}"][slicing]  # type: ignore
                     for each in gem_hit_features
                 ]
 
             chunk["target"] = [
                 torch.from_numpy(each.astype(np.float32))
-                for each in file[target_key][:stop]  # type: ignore
+                for each in file[target_key][slicing]  # type: ignore
             ]
 
         key_list_for_stack = ["tracker_track", "dt_segment", "csc_segment"]
@@ -247,9 +251,10 @@ class TrackerTrackSelectionDataset(Dataset):
             padded = pad_sequence(tensors, batch_first=True, padding_value=0)
             batch_dict[key] = padded
             # we can use tracker_track_data_mask for target (tracker_track_target)
-            if key != "target":
-                lengths = torch.tensor([t.shape[0] for t in tensors])
-                max_len = padded.shape[1]
-                mask = torch.arange(max_len).unsqueeze(0) < lengths.unsqueeze(1)
-                batch_dict[f"{key}_data_mask"] = mask
+            if key in ["target", "tracker_track_pt"]:
+                continue
+            lengths = torch.tensor([t.shape[0] for t in tensors])
+            max_len = padded.shape[1]
+            mask = torch.arange(max_len).unsqueeze(0) < lengths.unsqueeze(1)
+            batch_dict[f"{key}_data_mask"] = mask
         return TensorDict(batch_dict)

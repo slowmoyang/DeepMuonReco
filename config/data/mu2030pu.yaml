@@ -1,13 +1,5 @@
 # preprocessing parameters are determined from mu2030pu
 
-train_max_events: null
-val_max_events: null
-test_max_events: null
-batch_size: 64
-eval_batch_size: ${.batch_size}
-num_workers: 0
-pin_memory: false
-
 tracker_track:
   features: [px, py, pz, vx, vy, vz, charge]
   dim: ${len:${.features}}

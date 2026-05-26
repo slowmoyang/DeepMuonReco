@@ -3,6 +3,7 @@
 defaults:
   - model: latent_attention
   - data: mu2030pu
+  - data_loading: default
   - optim: default
   - paths: khu
   - torch: default
