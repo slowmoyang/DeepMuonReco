@@ -263,6 +263,11 @@ def run(
         None
     """
     # ---------------------------------------------------------------------------
+    # Log
+    # ---------------------------------------------------------------------------
+    _logger.info(f'{config=}')
+
+    # ---------------------------------------------------------------------------
     # Run directory
     # ---------------------------------------------------------------------------
     run_dir = Path(config.paths.run_dir)
@@ -362,7 +367,7 @@ def run(
     train_set = TrackerTrackSelectionDataset(
         path=config.paths.train_file,
         config=config.data,
-        max_events=config.data_loading.train_max_events,
+        max_events=config.data_load.train_max_events,
     )
     trackers.track("train_set_instantiated")
     _logger.info(f"Number of training examples: {len(train_set)}")
@@ -370,7 +375,7 @@ def run(
     val_set = TrackerTrackSelectionDataset(
         path=config.paths.val_file,
         config=config.data,
-        max_events=config.data_loading.val_max_events,
+        max_events=config.data_load.val_max_events,
     )
     trackers.track("val_set_instantiated")
     _logger.info(f"Number of validation examples: {len(val_set)}")
@@ -389,14 +394,14 @@ def run(
     # ---------------------------------------------------------------------------
     # Data loaders
     # ---------------------------------------------------------------------------
-    pin_memory = config.data_loading.pin_memory and (device.type == "cuda")
+    pin_memory = config.data_load.pin_memory and (device.type == "cuda")
     _logger.info(f"{pin_memory=}")
 
     train_loader = DataLoader(
         dataset=train_set,
-        batch_size=config.data_loading.batch_size,
+        batch_size=config.data_load.batch_size,
         shuffle=True,
-        num_workers=config.data_loading.num_workers,
+        num_workers=config.data_load.num_workers,
         collate_fn=train_set.collate,
         pin_memory=pin_memory,
         drop_last=True,  # drop last to avoid issues stem from small non-representative batches during training
@@ -406,9 +411,9 @@ def run(
 
     val_loader = DataLoader(
         dataset=val_set,
-        batch_size=config.data_loading.eval_batch_size,
+        batch_size=config.data_load.eval_batch_size,
         shuffle=False,  # no shuffling for evaluation
-        num_workers=config.data_loading.num_workers,
+        num_workers=config.data_load.num_workers,
         collate_fn=val_set.collate,
         pin_memory=pin_memory,
         drop_last=False,  # we want to validate on all validation examples
@@ -533,7 +538,7 @@ def run(
         _logger.info("Validation completed.")
         trackers.track(f"epoch_{epoch:06d}_val")
 
-        _logger.debug(f'logging validation results to Aim and checkpointing if necessary...')
+        _logger.debug(f'Logging validation results to Aim and checkpointing if necessary...')
         for key, value in val_result.items():
             aim_run.track(
                 value=value,
@@ -546,7 +551,7 @@ def run(
         model_checkpoint.step(metric=val_result)
         _logger.info(f'{global_state}: {val_result}')
 
-        _logger.debug('logging completed')
+        _logger.debug('Logging completed')
 
         _logger.info(f"Epoch {epoch} completed.")
 

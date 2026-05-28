@@ -95,9 +95,9 @@ def run(
 
     loader = DataLoader(
         dataset=dataset,
-        batch_size=config.data.eval_batch_size,
+        batch_size=config.data_load.eval_batch_size,
         shuffle=False,
-        num_workers=config.data.num_workers,
+        num_workers=config.data_load.num_workers,
         collate_fn=dataset.collate,
     )
 

@@ -1,6 +1,6 @@
 from pathlib import Path
 import logging
-from typing import Self
+from typing import Self, cast
 import h5py as h5
 import numpy as np
 import torch
@@ -54,7 +54,7 @@ class TrackerTrackSelectionDataset(Dataset):
         _logger.debug(f"Using {loader.__name__} to load the data.")
 
         def get_features(config, key):
-            if key not in config or config[key] is None:
+            if (key not in config) or (config[key] is None):
                 return None
             return config[key].get("features", None)
 
@@ -83,6 +83,7 @@ class TrackerTrackSelectionDataset(Dataset):
             gem_hit_features=gem_hit_features,
             target_key=config["tracker_track"]["target"],
             max_events=max_events,
+            track_is_good_track=config['tracker_track']['is_good'],
         )
         _logger.info(f"Loaded {len(self.example_list)} examples from {path}.")
 
@@ -122,6 +123,7 @@ class TrackerTrackSelectionDataset(Dataset):
         rpc_hit_features: list[str] | None,
         gem_hit_features: list[str] | None,
         max_events: int | float | None,
+        track_is_good_track: bool,
         target_key: str = "track_is_trk_muon",
         treepath: str = "deepMuonRecoNtuplizer/tree",
     ) -> list[TensorDict]:
@@ -138,6 +140,7 @@ class TrackerTrackSelectionDataset(Dataset):
         gem_segment_features: list[str] | None,
         rpc_hit_features: list[str] | None,
         gem_hit_features: list[str] | None,
+        track_is_good_track: bool,
         target_key: str = "track_is_trk_muon",
     ) -> list[TensorDict]:
         """
@@ -150,18 +153,28 @@ class TrackerTrackSelectionDataset(Dataset):
         with h5.File(path, "r") as file:
             total = len(file[next(iter(file.keys()))])  # type: ignore
             stop = cls._get_stop(max_events=max_events, total=total)
+            slicing = slice(None, stop)
 
             chunk = {}
 
-            slicing = slice(None, stop)
-
             # NOTE: reconstructed tracker tracks
+            if track_is_good_track:
+                mask = cast(np.ndarray, file['track_is_good_track'][slicing])
+            else:
+                mask = None
+
+            def select_tracker_tracks(arr: np.ndarray, mask: np.ndarray | None) -> np.ndarray:
+                if mask is None:
+                    return arr
+                return np.array(object=[x[m] for x, m in zip(arr, mask)], dtype=object)
+
+
             chunk["tracker_track"] = [
-                file[f"track_{each}"][slicing]  # type: ignore
+                select_tracker_tracks(file[f"track_{each}"][slicing], mask)  # type: ignore
                 for each in tracker_track_features
             ]
 
-            chunk['tracker_track_pt'] = file['track_pt'][slicing]  # type: ignore
+            chunk['tracker_track_pt'] = select_tracker_tracks(file['track_pt'][slicing], mask)  # type: ignore
 
             # NOTE: reconstructed segments in the muon system
             chunk["dt_segment"] = [

@@ -9,6 +9,7 @@ tracker_track:
     - _target_: muonly.data.transforms.MinMaxScaling
       input_min: [-14.243, -14.302, -15.286, -4.678, -4.946, -6.193, -1]
       input_max: [+13.967, +12.497, +14.909, +5.152, +3.461, +5.638, +1]
+  is_good: true
   target: track_is_trk_muon
 
 dt_segment:

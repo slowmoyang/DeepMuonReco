@@ -3,7 +3,7 @@
 defaults:
   - debug
 
-data_loading:
+data_load:
   train_max_events: 1024
   val_max_events: 1024
   test_max_events: 1024
