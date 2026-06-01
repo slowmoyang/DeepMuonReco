@@ -6,6 +6,7 @@ import os
 from typing import Any
 from contextlib import nullcontext
 import secrets
+import json
 
 import torch
 import torch.nn as nn
@@ -142,7 +143,7 @@ def train(
 
             mask = batch["tracker_track_data_mask"]
             logits = batch["logits"][mask]
-            target = batch["target"][mask]
+            target = batch["target"][mask].float()
             loss = criterion(input=logits, target=target)
             loss = loss.mean()
 
@@ -209,7 +210,7 @@ def validate(
 
             mask = batch["tracker_track_data_mask"]
             logits = batch["logits"][mask]
-            target = batch["target"][mask]
+            target = batch["target"][mask].float()
             preds = logits.sigmoid()
             loss = criterion(input=logits, target=target)
 
@@ -371,6 +372,7 @@ def run(
     )
     trackers.track("train_set_instantiated")
     _logger.info(f"Number of training examples: {len(train_set)}")
+    train_set.summarize(path=(run_dir / "train-set-summary.json"), verbose=True)
 
     val_set = TrackerTrackSelectionDataset(
         path=config.paths.val_file,

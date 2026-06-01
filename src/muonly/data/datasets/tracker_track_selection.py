@@ -1,6 +1,7 @@
 from pathlib import Path
 import logging
 from typing import Self, cast
+import json
 import h5py as h5
 import numpy as np
 import torch
@@ -21,6 +22,7 @@ __all__ = [
 _logger = logging.getLogger(__name__)
 
 
+
 def _stack_features(feature_list: list[np.ndarray]) -> list[torch.Tensor]:
     return [
         torch.from_numpy(np.stack(each, axis=1, dtype=np.float32))
@@ -29,6 +31,17 @@ def _stack_features(feature_list: list[np.ndarray]) -> list[torch.Tensor]:
 
 
 class TrackerTrackSelectionDataset(Dataset):
+    OBJECT_TYPES = (
+        "tracker_track",
+        "dt_segment",
+        "csc_segment",
+        "gem_segment",
+        "rpc_hit",
+        "gem_hit",
+    )
+
+
+
     def __init__(
         self,
         path: str | Path,
@@ -41,6 +54,9 @@ class TrackerTrackSelectionDataset(Dataset):
             config = OmegaConf.to_container(cfg=config, resolve=True)  # type: ignore
         if not isinstance(config, dict):
             raise TypeError("config must be a dict or DictConfig.")
+
+        _logger.debug(f'Initializing {self.__class__.__name__} with {path=}, {max_events=}, and {config=}...')
+
 
         path = Path(path)
 
@@ -83,7 +99,7 @@ class TrackerTrackSelectionDataset(Dataset):
             gem_hit_features=gem_hit_features,
             target_key=config["tracker_track"]["target"],
             max_events=max_events,
-            track_is_good_track=config['tracker_track']['is_good'],
+            tracker_track_is_good=config['tracker_track']['is_good'],
         )
         _logger.info(f"Loaded {len(self.example_list)} examples from {path}.")
 
@@ -123,7 +139,7 @@ class TrackerTrackSelectionDataset(Dataset):
         rpc_hit_features: list[str] | None,
         gem_hit_features: list[str] | None,
         max_events: int | float | None,
-        track_is_good_track: bool,
+        tracker_track_is_good: bool,
         target_key: str = "track_is_trk_muon",
         treepath: str = "deepMuonRecoNtuplizer/tree",
     ) -> list[TensorDict]:
@@ -140,7 +156,7 @@ class TrackerTrackSelectionDataset(Dataset):
         gem_segment_features: list[str] | None,
         rpc_hit_features: list[str] | None,
         gem_hit_features: list[str] | None,
-        track_is_good_track: bool,
+        tracker_track_is_good: bool,
         target_key: str = "track_is_trk_muon",
     ) -> list[TensorDict]:
         """
@@ -158,8 +174,19 @@ class TrackerTrackSelectionDataset(Dataset):
             chunk = {}
 
             # NOTE: reconstructed tracker tracks
-            if track_is_good_track:
-                mask = cast(np.ndarray, file['track_is_good_track'][slicing])
+            if tracker_track_is_good:
+                _logger.debug("Using 'track_is_good_track' as a mask to select good tracker tracks.")
+                mask = np.array(
+                    object=[
+                        each.astype(bool)
+                        for each in file['track_is_good_track'][slicing]
+                    ],
+                    dtype=object
+
+                )
+
+                eff = np.mean(np.concatenate(mask))
+                _logger.info(f"Using 'track_is_good_track' mask results in {eff:.2%} of the original tracker tracks being selected.")
             else:
                 mask = None
 
@@ -174,7 +201,15 @@ class TrackerTrackSelectionDataset(Dataset):
                 for each in tracker_track_features
             ]
 
-            chunk['tracker_track_pt'] = select_tracker_tracks(file['track_pt'][slicing], mask)  # type: ignore
+            chunk['tracker_track_pt'] = [
+                torch.from_numpy(each)
+                for each in  select_tracker_tracks(file['track_pt'][slicing], mask)  # type: ignore
+            ]
+
+            chunk["target"] = [
+                torch.from_numpy(each)
+                for each in select_tracker_tracks(file[target_key][slicing], mask) # type: ignore
+            ]
 
             # NOTE: reconstructed segments in the muon system
             chunk["dt_segment"] = [
@@ -206,11 +241,6 @@ class TrackerTrackSelectionDataset(Dataset):
                     for each in gem_hit_features
                 ]
 
-            chunk["target"] = [
-                torch.from_numpy(each.astype(np.float32))
-                for each in file[target_key][slicing]  # type: ignore
-            ]
-
         key_list_for_stack = ["tracker_track", "dt_segment", "csc_segment"]
         if gem_segment_features is not None:
             key_list_for_stack.append("gem_segment")
@@ -225,6 +255,47 @@ class TrackerTrackSelectionDataset(Dataset):
         return [
             TensorDict(dict(zip(chunk.keys(), each))) for each in zip(*chunk.values())
         ]
+
+    def summarize(
+        self,
+        path: Path | None = None,
+        verbose: bool = False,
+    ) -> dict[str, dict[str, float]]:
+        """Log min/max/mean/std of per-event object counts for each object type."""
+        if len(self) == 0:
+            raise RuntimeError("Cannot summarize an empty dataset.")
+
+        available = [
+            key for key in self.OBJECT_TYPES if key in self.example_list[0].sorted_keys
+        ]
+
+        counts = {key: [] for key in available}
+        for example in self.example_list:
+            for key in available:
+                counts[key].append(example[key].shape[0])
+
+        log = {}
+        for key, values in counts.items():
+            tensor = torch.tensor(values, dtype=torch.float32)
+
+            log[key] = {
+                "min": tensor.min().item(),
+                "max": tensor.max().item(),
+                "mean": tensor.mean().item(),
+                "std": tensor.std().item(),
+            }
+
+        if path is not None:
+            with path.open(mode='w') as stream:
+                json.dump(log, stream, indent=4)
+
+        if verbose:
+            for key, stats in log.items():
+                _logger.info(
+                    f"{key}: count min={stats['min']}, max={stats['max']}, mean={stats['mean']:.2f}, std={stats['std']:.2f}"
+                )
+
+        return log
 
     def apply_(self, transforms: dict[str, Compose]) -> Self:
         """Apply transforms transforms to all examples in-place.
