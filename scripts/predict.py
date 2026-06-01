@@ -86,7 +86,7 @@ def run(
     dataset = TrackerTrackSelectionDataset(
         path=config.paths[f'{split}_file'],
         config=config.data,
-        max_events=config.data.test_max_events, # FIXME:
+        max_events=config.data_load[f'{split}_max_events'],
     )
     _logger.info(f"Number of test examples: {len(dataset)}")
 
