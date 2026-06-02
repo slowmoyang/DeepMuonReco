@@ -176,14 +176,8 @@ class TrackerTrackSelectionDataset(Dataset):
             # NOTE: reconstructed tracker tracks
             if tracker_track_is_good:
                 _logger.debug("Using 'track_is_good_track' as a mask to select good tracker tracks.")
-                mask = np.array(
-                    object=[
-                        each.astype(bool)
-                        for each in file['track_is_good_track'][slicing]
-                    ],
-                    dtype=object
-
-                )
+                mask = file['track_is_good_track'][slicing]
+                mask = np.vectorize(lambda each: each.astype(np.bool_), otypes=[object])(mask)
 
                 eff = np.mean(np.concatenate(mask))
                 _logger.info(f"Using 'track_is_good_track' mask results in {eff:.2%} of the original tracker tracks being selected.")
