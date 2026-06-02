@@ -244,14 +244,39 @@ def validate(
     # NOTE:
     fig, ax = plt.subplots()
     hist_plot_kwargs = dict(ax=ax, histtype="step", density=True)
-    h_bkg.plot(label="Background Tracaks", color="tab:blue", **hist_plot_kwargs)
+    h_bkg.plot(label="Background Tracks", color="tab:blue", **hist_plot_kwargs)
     h_sig.plot(label="Signal Tracks", color="tab:orange", **hist_plot_kwargs)
     ax.set_xlabel("Score")
-    ax.set_ylabel("A.U.")
+    ax.set_ylabel("Density")
     ax.legend()
     result["dist_score"] = fig
 
     return result
+
+
+def compute_pos_weight(dataset: TrackerTrackSelectionDataset) -> torch.Tensor:
+    pos_count = 0
+    neg_count = 0
+
+    for example in tqdm.rich.tqdm(dataset, desc="Computing pos_weight"):
+        target = example["target"]
+
+        pos = target.long().sum().item()
+        total = target.numel()
+        neg = total - pos
+
+        pos_count += pos
+        neg_count += neg
+
+    if pos_count == 0:
+        raise ValueError("No positive examples found in the dataset. Cannot compute pos_weight.")
+    if neg_count == 0:
+        raise ValueError("No negative examples found in the dataset. Cannot compute pos_weight.")
+
+    pos_weight = neg_count / pos_count
+
+    return torch.tensor(pos_weight)
+
 
 
 def run(
@@ -427,8 +452,17 @@ def run(
     # ---------------------------------------------------------------------------
     # criterion
     # ---------------------------------------------------------------------------
+    if config.optim.pos_weight == 'auto':
+        pos_weight = compute_pos_weight(train_set)
+    elif isinstance(config.optim.pos_weight, (int, float)):
+        pos_weight = torch.tensor(config.optim.pos_weight)
+    else:
+        raise ValueError(f"Unsupported pos_weight value: {config.optim.pos_weight}")
+
+    _logger.info(f"Positive weight: {pos_weight.item():.4f}")
+
     criterion = nn.BCEWithLogitsLoss(
-        pos_weight=torch.tensor(config.optim.pos_weight),
+        pos_weight=pos_weight,
         reduction="none",
     )
 

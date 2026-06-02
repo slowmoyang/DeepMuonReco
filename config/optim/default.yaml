@@ -16,4 +16,4 @@ annealing: # cosine annealing
 
 max_grad_norm: 1
 
-pos_weight: 150.0
+pos_weight: auto
