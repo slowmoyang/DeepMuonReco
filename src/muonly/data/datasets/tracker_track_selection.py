@@ -22,7 +22,6 @@ __all__ = [
 _logger = logging.getLogger(__name__)
 
 
-
 def _stack_features(feature_list: list[np.ndarray]) -> list[torch.Tensor]:
     return [
         torch.from_numpy(np.stack(each, axis=1, dtype=np.float32))
@@ -40,8 +39,6 @@ class TrackerTrackSelectionDataset(Dataset):
         "gem_hit",
     )
 
-
-
     def __init__(
         self,
         path: str | Path,
@@ -55,8 +52,9 @@ class TrackerTrackSelectionDataset(Dataset):
         if not isinstance(config, dict):
             raise TypeError("config must be a dict or DictConfig.")
 
-        _logger.debug(f'Initializing {self.__class__.__name__} with {path=}, {max_events=}, and {config=}...')
-
+        _logger.debug(
+            f"Initializing {self.__class__.__name__} with {path=}, {max_events=}, and {config=}..."
+        )
 
         path = Path(path)
 
@@ -99,7 +97,7 @@ class TrackerTrackSelectionDataset(Dataset):
             gem_hit_features=gem_hit_features,
             target_key=config["tracker_track"]["target"],
             max_events=max_events,
-            tracker_track_is_good=config['tracker_track']['is_good'],
+            tracker_track_is_good=config["tracker_track"]["is_good"],
         )
         _logger.info(f"Loaded {len(self.example_list)} examples from {path}.")
 
@@ -175,34 +173,41 @@ class TrackerTrackSelectionDataset(Dataset):
 
             # NOTE: reconstructed tracker tracks
             if tracker_track_is_good:
-                _logger.debug("Using 'track_is_good_track' as a mask to select good tracker tracks.")
-                mask = file['track_is_good_track'][slicing]
-                mask = np.vectorize(lambda each: each.astype(np.bool_), otypes=[object])(mask)
+                _logger.debug(
+                    "Using 'track_is_good_track' as a mask to select good tracker tracks."
+                )
+                mask = file["track_is_good_track"][slicing]
+                mask = np.vectorize(
+                    lambda each: each.astype(np.bool_), otypes=[object]
+                )(mask)
 
                 eff = np.mean(np.concatenate(mask))
-                _logger.info(f"Using 'track_is_good_track' mask results in {eff:.2%} of the original tracker tracks being selected.")
+                _logger.info(
+                    f"Using 'track_is_good_track' mask results in {eff:.2%} of the original tracker tracks being selected."
+                )
             else:
                 mask = None
 
-            def select_tracker_tracks(arr: np.ndarray, mask: np.ndarray | None) -> np.ndarray:
+            def select_tracker_tracks(
+                arr: np.ndarray, mask: np.ndarray | None
+            ) -> np.ndarray:
                 if mask is None:
                     return arr
                 return np.array(object=[x[m] for x, m in zip(arr, mask)], dtype=object)
-
 
             chunk["tracker_track"] = [
                 select_tracker_tracks(file[f"track_{each}"][slicing], mask)  # type: ignore
                 for each in tracker_track_features
             ]
 
-            chunk['tracker_track_pt'] = [
+            chunk["tracker_track_pt"] = [
                 torch.from_numpy(each)
-                for each in  select_tracker_tracks(file['track_pt'][slicing], mask)  # type: ignore
+                for each in select_tracker_tracks(file["track_pt"][slicing], mask)  # type: ignore
             ]
 
             chunk["target"] = [
                 torch.from_numpy(each)
-                for each in select_tracker_tracks(file[target_key][slicing], mask) # type: ignore
+                for each in select_tracker_tracks(file[target_key][slicing], mask)  # type: ignore
             ]
 
             # NOTE: reconstructed segments in the muon system
@@ -280,7 +285,7 @@ class TrackerTrackSelectionDataset(Dataset):
             }
 
         if path is not None:
-            with path.open(mode='w') as stream:
+            with path.open(mode="w") as stream:
                 json.dump(log, stream, indent=4)
 
         if verbose:

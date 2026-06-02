@@ -236,10 +236,7 @@ def validate(
     # ---------------------------------------------------------------------------
     #
     # ---------------------------------------------------------------------------
-    result = {
-        name: metric.compute().item()
-        for name, metric in metric_dict.items()
-    }
+    result = {name: metric.compute().item() for name, metric in metric_dict.items()}
 
     # NOTE:
     fig, ax = plt.subplots()
@@ -269,14 +266,17 @@ def compute_pos_weight(dataset: TrackerTrackSelectionDataset) -> torch.Tensor:
         neg_count += neg
 
     if pos_count == 0:
-        raise ValueError("No positive examples found in the dataset. Cannot compute pos_weight.")
+        raise ValueError(
+            "No positive examples found in the dataset. Cannot compute pos_weight."
+        )
     if neg_count == 0:
-        raise ValueError("No negative examples found in the dataset. Cannot compute pos_weight.")
+        raise ValueError(
+            "No negative examples found in the dataset. Cannot compute pos_weight."
+        )
 
     pos_weight = neg_count / pos_count
 
     return torch.tensor(pos_weight)
-
 
 
 def run(
@@ -293,7 +293,7 @@ def run(
     # ---------------------------------------------------------------------------
     # Log
     # ---------------------------------------------------------------------------
-    _logger.info(f'{config=}')
+    _logger.info(f"{config=}")
 
     # ---------------------------------------------------------------------------
     # Run directory
@@ -452,7 +452,7 @@ def run(
     # ---------------------------------------------------------------------------
     # criterion
     # ---------------------------------------------------------------------------
-    if config.optim.pos_weight == 'auto':
+    if config.optim.pos_weight == "auto":
         pos_weight = compute_pos_weight(train_set)
     elif isinstance(config.optim.pos_weight, (int, float)):
         pos_weight = torch.tensor(config.optim.pos_weight)
@@ -576,7 +576,9 @@ def run(
         _logger.info("Validation completed.")
         trackers.track(f"epoch_{epoch:06d}_val")
 
-        _logger.debug(f'Logging validation results to Aim and checkpointing if necessary...')
+        _logger.debug(
+            f"Logging validation results to Aim and checkpointing if necessary..."
+        )
         for key, value in val_result.items():
             if isinstance(value, plt.Figure):
                 value = Image(value)
@@ -589,9 +591,9 @@ def run(
             )
         plt.close("all")
         model_checkpoint.step(metric=val_result)
-        _logger.info(f'{global_state}: {val_result}')
+        _logger.info(f"{global_state}: {val_result}")
 
-        _logger.debug('Logging completed')
+        _logger.debug("Logging completed")
 
         _logger.info(f"Epoch {epoch} completed.")
 

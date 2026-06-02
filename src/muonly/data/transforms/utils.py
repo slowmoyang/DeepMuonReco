@@ -18,11 +18,15 @@ def configure_preprocessing(config):
 
     for key in optional_keys:
         if key not in config:
-            _logger.info(f"Skipping preprocessing for {key} as it is not present in the configuration.")
+            _logger.info(
+                f"Skipping preprocessing for {key} as it is not present in the configuration."
+            )
             continue
 
         if config[key] is None:
-            _logger.info(f"Skipping preprocessing for {key} as it is set to None in the configuration.")
+            _logger.info(
+                f"Skipping preprocessing for {key} as it is set to None in the configuration."
+            )
             continue
 
         _logger.info(f"Configuring preprocessing for {key}...")
