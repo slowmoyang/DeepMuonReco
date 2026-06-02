@@ -190,7 +190,7 @@ def validate(
         "loss_high_pt": MeanMetric(),
         "auroc": BinaryAUROC(thresholds=1000),
         "auroc_low_pt": BinaryAUROC(thresholds=1000),
-        "auroc_high_pt": BinaryAUROC(thresholds=1000),
+        "auroc_high_pt": BinaryAUROC(),
     }
 
     h_sig = Hist.new.Reg(40, 0, 1).Double()
@@ -243,11 +243,13 @@ def validate(
 
     # NOTE:
     fig, ax = plt.subplots()
-    h_bkg.plot(ax=ax, label="background", histtype="step", color="tab:blue")
-    h_sig.plot(ax=ax, label="signal", histtype="step", color="tab:orange")
+    hist_plot_kwargs = dict(ax=ax, histtype="step", density=True)
+    h_bkg.plot(label="Background Tracaks", color="tab:blue", **hist_plot_kwargs)
+    h_sig.plot(label="Signal Tracks", color="tab:orange", **hist_plot_kwargs)
     ax.set_xlabel("Score")
-    ax.set_ylabel("Count")
-    result["dist_score"] = Image(fig)
+    ax.set_ylabel("A.U.")
+    ax.legend()
+    result["dist_score"] = fig
 
     return result
 
@@ -542,6 +544,8 @@ def run(
 
         _logger.debug(f'Logging validation results to Aim and checkpointing if necessary...')
         for key, value in val_result.items():
+            if isinstance(value, plt.Figure):
+                value = Image(value)
             aim_run.track(
                 value=value,
                 name=key,
@@ -563,15 +567,35 @@ def run(
     # Load best checkpoint
     # ---------------------------------------------------------------------------
 
-    # checkpoint = torch.load(model_checkpoint.best_path)
-    # model.load_state_dict(checkpoint["model"])
-    # del checkpoint
+    checkpoint = torch.load(model_checkpoint.best_path)
+    model.load_state_dict(checkpoint["model"])
+    del checkpoint
 
     # ---------------------------------------------------------------------------
     # Run final evaluation on validation set with best model checkpoint
     # ---------------------------------------------------------------------------
-
-    # TODO:
+    #
+    # # TODO:
+    # result = validate(
+    #     model=td_model,
+    #     criterion=criterion,
+    #     data_loader=val_loader,
+    #     device=device,
+    #     config=config,
+    #     amp_context=amp_context,
+    # )
+    #
+    # for key, value in result.items():
+    #     if isinstance(value, plt.Figure):
+    #         value = Image(value)
+    #     aim_run.track(
+    #         value=value,
+    #         name=key,
+    #         epoch=global_state.epoch,
+    #         step=global_state.step,
+    #         context={"subset": "val"},
+    #     )
+    # plt.close("all")
 
 
 @hydra.main(
