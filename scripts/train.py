@@ -326,6 +326,13 @@ def run(
     if device.type == "cuda":
         trackers += CUDAMemoryTracker(device=device, output_dir=run_dir)
 
+    # warmup gpus
+    if device.type == "cuda":
+        _logger.info("Warming up GPU...")
+        torch.empty(0, device=device)
+        trackers.track("gpu_warmup")
+        _logger.info("GPU warmup completed.")
+
     # ---------------------------------------------------------------------------
     # Save config
     # ---------------------------------------------------------------------------
