@@ -1,5 +1,5 @@
-num_threads: null
-num_interop_threads: null
+num_threads: 16
+num_interop_threads: 1
 float32_matmul_precision: high
 device: cuda:0
 precision: bfloat16
