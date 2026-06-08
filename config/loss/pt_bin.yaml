@@ -1,0 +1,5 @@
+pos_weight: auto
+
+balancing:
+  type: pt_bin
+  edges: [0, 3, 30, 1000]

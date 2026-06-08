@@ -1,3 +1,5 @@
+# @package _global_
+
 exp: debug
 
 hydra:

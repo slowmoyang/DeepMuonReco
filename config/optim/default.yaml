@@ -15,5 +15,3 @@ annealing: # cosine annealing
   eta_min_factor: 0.01 # minimum learning rate is 1% of the base learning rate
 
 max_grad_norm: 1
-
-pos_weight: auto

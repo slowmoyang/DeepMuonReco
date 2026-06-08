@@ -3,7 +3,7 @@
 defaults:
   - default
   - _self_
-  - mode: null
+  - override mode: null
 
 exp: no-hit
 

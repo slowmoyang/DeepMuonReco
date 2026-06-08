@@ -5,6 +5,7 @@ defaults:
   - data: mu2030pu
   - data_load: default
   - optim: default
+  - loss: pt_mask
   - paths: khu
   - torch: default
   - hydra: default

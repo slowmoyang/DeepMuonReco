@@ -6,9 +6,9 @@ import os
 from typing import Any
 from contextlib import nullcontext
 import secrets
-import json
 
 import torch
+from torch import Tensor
 import torch.nn as nn
 from torch.nn.utils import clip_grad_norm_
 from torch.optim import AdamW
@@ -113,6 +113,36 @@ class GlobalState:
 #
 # ===============================================================================
 
+def compute_loss(batch, criterion, config: DictConfig) -> Tensor:
+    mask = batch["tracker_track_data_mask"]
+    logits = batch["logits"]
+    target = batch["target"].float()
+    pt = batch["tracker_track_pt"]
+
+    if config.balancing is not None:
+        if config.balancing.type == "pt_mask":
+            mask = mask & (pt > config.balancing.pt_min)
+            loss = criterion(input=logits[mask], target=target[mask]).mean()
+        elif config.balancing.type == "pt_bin":
+            # Compute the loss within each pt bin defined by consecutive
+            # edges in ``config.pt_edges`` and average over the bins, so that
+            # every pt range contributes equally regardless of its population.
+            # Use ``.inf`` as the final edge to cover the high-pt tail.
+            pt_edges = config.balancing.edges
+            loss_list = []
+            for pt_low, pt_high in zip(pt_edges[:-1], pt_edges[1:]):
+                bin_mask = mask & (pt > pt_low) & (pt <= pt_high)
+                loss_list.append(criterion(input=logits[bin_mask], target=target[bin_mask]).mean())
+            loss = torch.stack(loss_list).mean()
+        else:
+            raise ValueError(f"Unsupported loss balancing type: {config.balancing.type}")
+    else:
+        logits = batch["logits"][mask]
+        target = batch["target"][mask].float()
+        loss = criterion(input=logits, target=target)
+
+    return loss
+
 
 def train(
     model,
@@ -140,16 +170,12 @@ def train(
 
         with amp_context:
             batch = model(batch)
-
-            mask = batch["tracker_track_data_mask"]
-            logits = batch["logits"][mask]
-            target = batch["target"][mask].float()
-            loss = criterion(input=logits, target=target)
-            loss = loss.mean()
+            loss = compute_loss(batch=batch, criterion=criterion, config=config.loss)
 
         loss.backward()
         clip_grad_norm_(
-            parameters=model.parameters(), max_norm=config.optim.max_grad_norm
+            parameters=model.parameters(),
+            max_norm=config.optim.max_grad_norm
         )
         optimizer.step()
         optimizer.zero_grad()
@@ -186,11 +212,10 @@ def validate(
     # ---------------------------------------------------------------------------
     metric_dict = {
         "loss": MeanMetric(),
-        "loss_low_pt": MeanMetric(),
-        "loss_high_pt": MeanMetric(),
-        "auroc": BinaryAUROC(thresholds=1000),
-        "auroc_low_pt": BinaryAUROC(thresholds=1000),
-        "auroc_high_pt": BinaryAUROC(),
+        "loss_pt_0p5_3": MeanMetric(),
+        "loss_pt_3_inf": MeanMetric(),
+        "auroc_pt_3_inf": BinaryAUROC(thresholds=1_000),
+        "auroc_pt_30_inf": BinaryAUROC(thresholds=1_000),
     }
 
     h_sig = Hist.new.Reg(40, 0, 1).Double()
@@ -219,19 +244,27 @@ def validate(
         target = target.long().cpu()
         pt = batch["tracker_track_pt"][mask].float().cpu()
 
-        low_pt = pt < 3
-        high_pt = pt >= 3
+        mask_pt_0p5_3 = (pt > 0.5) & (pt <= 3)
+        mask_pt_3_inf = (pt > 3)
+        mask_pt_30_inf = (pt > 30)
 
         metric_dict["loss"].update(loss)
-        metric_dict["loss_low_pt"].update(loss[low_pt])
-        metric_dict["loss_high_pt"].update(loss[high_pt])
-        metric_dict["auroc"].update(preds=preds, target=target)
-        metric_dict["auroc_low_pt"].update(preds=preds[low_pt], target=target[low_pt])
-        metric_dict["auroc_high_pt"].update(
-            preds=preds[high_pt], target=target[high_pt]
-        )
-        h_sig.fill(preds[target == 1].numpy())
-        h_bkg.fill(preds[target == 0].numpy())
+        metric_dict["loss_pt_0p5_3"].update(loss[mask_pt_0p5_3])
+        metric_dict["loss_pt_3_inf"].update(loss[mask_pt_3_inf])
+        metric_dict["auroc_pt_3_inf"].update(preds=preds[mask_pt_3_inf], target=target[mask_pt_3_inf])
+        metric_dict["auroc_pt_30_inf"].update(preds=preds[mask_pt_30_inf], target=target[mask_pt_30_inf])
+
+        # numpy
+        sig_mask = target == 1
+        bkg_mask = torch.logical_not(sig_mask)
+
+        target = target.numpy()
+        preds = preds.numpy()
+
+        h_sig.fill(preds[sig_mask])
+        h_bkg.fill(preds[bkg_mask])
+
+
 
     # ---------------------------------------------------------------------------
     #
@@ -240,7 +273,7 @@ def validate(
 
     # NOTE:
     fig, ax = plt.subplots()
-    hist_plot_kwargs = dict(ax=ax, histtype="step", density=True)
+    hist_plot_kwargs: dict[str, Any] = dict(ax=ax, histtype="step", density=True)
     h_bkg.plot(label="Background Tracks", color="tab:blue", **hist_plot_kwargs)
     h_sig.plot(label="Signal Tracks", color="tab:orange", **hist_plot_kwargs)
     ax.set_xlabel("Score")
@@ -251,12 +284,30 @@ def validate(
     return result
 
 
-def compute_pos_weight(dataset: TrackerTrackSelectionDataset) -> torch.Tensor:
+def compute_pos_weight(dataset: TrackerTrackSelectionDataset, config) -> torch.Tensor:
     pos_count = 0
     neg_count = 0
 
+    balancing = config.loss.balancing
+
     for example in tqdm.rich.tqdm(dataset, desc="Computing pos_weight"):
         target = example["target"]
+
+        if balancing is not None:
+            pt = example["tracker_track_pt"]
+            if balancing.type == "pt_mask":
+                # Only tracks above ``pt_min`` enter the loss, so restrict the
+                # positive/negative count to the same region.
+                mask = pt > balancing.pt_min
+            elif balancing.type == "pt_bin":
+                # The loss only covers tracks within the pt bin range, so count
+                # over the union of the bins defined by ``edges``.
+                edges = balancing.edges
+                mask = (pt > edges[0]) & (pt <= edges[-1])
+            else:
+                raise ValueError(f"Unsupported loss balancing type: {balancing.type}")
+
+            target = target[mask]
 
         pos = target.long().sum().item()
         total = target.numel()
@@ -459,12 +510,12 @@ def run(
     # ---------------------------------------------------------------------------
     # criterion
     # ---------------------------------------------------------------------------
-    if config.optim.pos_weight == "auto":
-        pos_weight = compute_pos_weight(train_set)
-    elif isinstance(config.optim.pos_weight, (int, float)):
-        pos_weight = torch.tensor(config.optim.pos_weight)
+    if config.loss.pos_weight == "auto":
+        pos_weight = compute_pos_weight(train_set, config)
+    elif isinstance(config.loss.pos_weight, (int, float)):
+        pos_weight = torch.tensor(config.loss.pos_weight)
     else:
-        raise ValueError(f"Unsupported pos_weight value: {config.optim.pos_weight}")
+        raise ValueError(f"Unsupported pos_weight value: {config.loss.pos_weight}")
 
     _logger.info(f"Positive weight: {pos_weight.item():.4f}")
 
@@ -472,6 +523,8 @@ def run(
         pos_weight=pos_weight,
         reduction="none",
     )
+
+    _logger.info(f"{criterion=}")
 
     # ---------------------------------------------------------------------------
     # Optimization
