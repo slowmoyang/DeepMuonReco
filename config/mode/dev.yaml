@@ -1,0 +1,18 @@
+# @package _global_
+
+exp: dev
+
+hydra:
+  job_logging:
+    root:
+      level: DEBUG
+
+data_load:
+  train_max_events: 0.2
+  val_max_events: 0.2
+  test_max_events: null # use all events
+  batch_size: 256
+  eval_batch_size: 256
+
+optim:
+  max_epochs: 20
