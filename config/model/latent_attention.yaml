@@ -9,13 +9,13 @@ gem_hit_dim: ${data.gem_hit.dim}
 
 output_dim: 1
 
-model_dim: 64
-num_heads: 4
-track_latent_len: 64
-muon_det_latent_len: 16
-muon_det_num_processors: 1
+model_dim: 128
+num_heads: 8
+track_latent_len: 256
+muon_det_latent_len: 64
+muon_det_num_processors: 2
 muon_det_processor_block_weight_sharing: false
-encoder_num_layers: 1
-decoder_num_layers: 1
+encoder_num_layers: 2
+decoder_num_layers: 2
 widening_factor: 4
 dropout: 0
