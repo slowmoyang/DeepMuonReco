@@ -188,3 +188,4 @@ pyrightconfig.json
 
 .aim
 logs/
+*.ipynb
