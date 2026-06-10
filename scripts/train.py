@@ -6,6 +6,7 @@ import os
 from typing import Any
 from contextlib import nullcontext
 import secrets
+import sys
 
 import torch
 from torch import Tensor
@@ -120,10 +121,7 @@ def compute_loss(batch, criterion, config: DictConfig) -> Tensor:
     pt = batch["tracker_track_pt"]
 
     if config.balancing is not None:
-        if config.balancing.type == "pt_mask":
-            mask = mask & (pt > config.balancing.pt_min)
-            loss = criterion(input=logits[mask], target=target[mask]).mean()
-        elif config.balancing.type == "pt_bin":
+        if config.balancing.type == "pt_bin":
             # Compute the loss within each pt bin defined by consecutive
             # edges in ``config.pt_edges`` and average over the bins, so that
             # every pt range contributes equally regardless of its population.
@@ -345,6 +343,7 @@ def run(
     # Log
     # ---------------------------------------------------------------------------
     _logger.info(f"{config=}")
+    _logger.info(f"{sys.argv=}")
 
     # ---------------------------------------------------------------------------
     # Run directory
