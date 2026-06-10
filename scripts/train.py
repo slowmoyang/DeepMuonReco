@@ -286,24 +286,18 @@ def compute_pos_weight(dataset: TrackerTrackSelectionDataset, config) -> torch.T
     pos_count = 0
     neg_count = 0
 
-    balancing = config.loss.balancing
-
     for example in tqdm.rich.tqdm(dataset, desc="Computing pos_weight"):
         target = example["target"]
 
-        if balancing is not None:
-            pt = example["tracker_track_pt"]
-            if balancing.type == "pt_mask":
-                # Only tracks above ``pt_min`` enter the loss, so restrict the
-                # positive/negative count to the same region.
-                mask = pt > balancing.pt_min
-            elif balancing.type == "pt_bin":
+        if config.loss.get('balancing') is not None:
+            if config.loss.balancing.type == "pt_bin":
+                pt = example["tracker_track_pt"]
                 # The loss only covers tracks within the pt bin range, so count
                 # over the union of the bins defined by ``edges``.
-                edges = balancing.edges
+                edges = config.loss.balancing.edges
                 mask = (pt > edges[0]) & (pt <= edges[-1])
             else:
-                raise ValueError(f"Unsupported loss balancing type: {balancing.type}")
+                raise ValueError(f"Unsupported loss balancing type: {config.loss.balancing.type}")
 
             target = target[mask]
 
