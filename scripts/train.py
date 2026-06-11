@@ -53,16 +53,16 @@ from muonly.utils.reproducibility import set_seed
 
 mh.style.use("CMS")
 
-# ===============================================================================
+#===============================================================================
 #
-# ===============================================================================
+#===============================================================================
 
 # FIXME: better way to set project root for hydra
 os.environ["PROJECT_ROOT"] = str(Path(__file__).parents[1].resolve())
 
-# ===============================================================================
+#===============================================================================
 # logging
-# ===============================================================================
+#===============================================================================
 _logger = logging.getLogger(Path(__file__).name)
 logging.basicConfig(level=logging.INFO)
 
@@ -71,9 +71,9 @@ warnings.filterwarnings("ignore", category=TqdmExperimentalWarning)
 for name in ["matplotlib", "PIL", "aim", "h5py", "filelock"]:
     logging.getLogger(name).setLevel(logging.CRITICAL)
 
-# ===============================================================================
+#===============================================================================
 # resolvers
-# ===============================================================================
+#===============================================================================
 
 OmegaConf.register_new_resolver(
     name="slug",
@@ -94,10 +94,9 @@ OmegaConf.register_new_resolver(
     resolver=len,
 )
 
-# ===============================================================================
+#===============================================================================
 #
-# ===============================================================================
-
+#===============================================================================
 
 @dataclass(repr=True)
 class GlobalState:
@@ -110,9 +109,10 @@ class GlobalState:
         return asdict(self)
 
 
-# ===============================================================================
+#===============================================================================
 #
-# ===============================================================================
+#===============================================================================
+
 
 def compute_loss(batch, criterion, config: DictConfig) -> Tensor:
     mask = batch["tracker_track_data_mask"]
@@ -120,26 +120,34 @@ def compute_loss(batch, criterion, config: DictConfig) -> Tensor:
     target = batch["target"].float()
     pt = batch["tracker_track_pt"]
 
-    if config.balancing is not None:
-        if config.balancing.type == "pt_bin":
-            # Compute the loss within each pt bin defined by consecutive
-            # edges in ``config.pt_edges`` and average over the bins, so that
-            # every pt range contributes equally regardless of its population.
-            # Use ``.inf`` as the final edge to cover the high-pt tail.
-            pt_edges = config.balancing.edges
+    if config.loss.get("balancing") is not None:
+        if config.loss.balancing.type == "pt_bin":
+            pt_edges = config.loss.balancing.edges
             loss_list = []
             for pt_low, pt_high in zip(pt_edges[:-1], pt_edges[1:]):
+                pt_low = pt_low or 0
+                pt_high = pt_high or float("inf")
+
                 bin_mask = mask & (pt > pt_low) & (pt <= pt_high)
-                loss_list.append(criterion(input=logits[bin_mask], target=target[bin_mask]).mean())
+                loss_list.append(
+                    criterion(input=logits[bin_mask], target=target[bin_mask]).mean()
+                )
             loss = torch.stack(loss_list).mean()
         else:
-            raise ValueError(f"Unsupported loss balancing type: {config.balancing.type}")
+            raise ValueError(
+                f"Unsupported loss balancing type: {config.loss.balancing.type}"
+            )
     else:
         logits = batch["logits"][mask]
         target = batch["target"][mask].float()
         loss = criterion(input=logits, target=target)
-
+        loss = loss.mean()
     return loss
+
+
+#===============================================================================
+#
+#===============================================================================
 
 
 def train(
@@ -168,12 +176,11 @@ def train(
 
         with amp_context:
             batch = model(batch)
-            loss = compute_loss(batch=batch, criterion=criterion, config=config.loss)
+            loss = compute_loss(batch=batch, criterion=criterion, config=config)
 
         loss.backward()
         clip_grad_norm_(
-            parameters=model.parameters(),
-            max_norm=config.optim.max_grad_norm
+            parameters=model.parameters(), max_norm=config.optim.max_grad_norm
         )
         optimizer.step()
         optimizer.zero_grad()
@@ -190,6 +197,11 @@ def train(
         )
 
 
+#===============================================================================
+#
+#===============================================================================
+
+
 @torch.inference_mode()
 def validate(
     model: nn.Module,
@@ -200,28 +212,27 @@ def validate(
     amp_context: torch.autocast | nullcontext,
 ) -> dict[str, Any]:
     """ """
-    # ---------------------------------------------------------------------------
+    #---------------------------------------------------------------------------
     #
-    # ---------------------------------------------------------------------------
+    #---------------------------------------------------------------------------
     model.eval()
 
-    # ---------------------------------------------------------------------------
+    #---------------------------------------------------------------------------
     # Metrics and histogram setup
-    # ---------------------------------------------------------------------------
+    #---------------------------------------------------------------------------
     metric_dict = {
         "loss": MeanMetric(),
         "loss_pt_0p5_3": MeanMetric(),
         "loss_pt_3_inf": MeanMetric(),
         "auroc_pt_3_inf": BinaryAUROC(thresholds=1_000),
-        "auroc_pt_30_inf": BinaryAUROC(thresholds=1_000),
     }
 
     h_sig = Hist.new.Reg(40, 0, 1).Double()
     h_bkg = h_sig.copy()
 
-    # ---------------------------------------------------------------------------
+    #---------------------------------------------------------------------------
     #
-    # ---------------------------------------------------------------------------
+    #---------------------------------------------------------------------------
 
     for batch in tqdm.rich.tqdm(
         data_loader, desc="Evaluating", disable=(not config.misc.tqdm)
@@ -243,30 +254,25 @@ def validate(
         pt = batch["tracker_track_pt"][mask].float().cpu()
 
         mask_pt_0p5_3 = (pt > 0.5) & (pt <= 3)
-        mask_pt_3_inf = (pt > 3)
-        mask_pt_30_inf = (pt > 30)
+        mask_pt_3_inf = pt > 3
 
         metric_dict["loss"].update(loss)
         metric_dict["loss_pt_0p5_3"].update(loss[mask_pt_0p5_3])
         metric_dict["loss_pt_3_inf"].update(loss[mask_pt_3_inf])
-        metric_dict["auroc_pt_3_inf"].update(preds=preds[mask_pt_3_inf], target=target[mask_pt_3_inf])
-        metric_dict["auroc_pt_30_inf"].update(preds=preds[mask_pt_30_inf], target=target[mask_pt_30_inf])
+        metric_dict["auroc_pt_3_inf"].update(
+            preds=preds[mask_pt_3_inf], target=target[mask_pt_3_inf]
+        )
 
         # numpy
         sig_mask = target == 1
         bkg_mask = torch.logical_not(sig_mask)
 
-        target = target.numpy()
-        preds = preds.numpy()
+        h_sig.fill(preds[sig_mask].numpy())
+        h_bkg.fill(preds[bkg_mask].numpy())
 
-        h_sig.fill(preds[sig_mask])
-        h_bkg.fill(preds[bkg_mask])
-
-
-
-    # ---------------------------------------------------------------------------
+    #---------------------------------------------------------------------------
     #
-    # ---------------------------------------------------------------------------
+    #---------------------------------------------------------------------------
     result = {name: metric.compute().item() for name, metric in metric_dict.items()}
 
     # NOTE:
@@ -281,15 +287,18 @@ def validate(
 
     return result
 
+#===============================================================================
+#
+#===============================================================================
 
-def compute_pos_weight(dataset: TrackerTrackSelectionDataset, config) -> torch.Tensor:
+def compute_pos_weight(dataset: TrackerTrackSelectionDataset, config) -> Tensor:
     pos_count = 0
     neg_count = 0
 
     for example in tqdm.rich.tqdm(dataset, desc="Computing pos_weight"):
         target = example["target"]
 
-        if config.loss.get('balancing') is not None:
+        if config.loss.get("balancing") is not None:
             if config.loss.balancing.type == "pt_bin":
                 pt = example["tracker_track_pt"]
                 # The loss only covers tracks within the pt bin range, so count
@@ -297,7 +306,9 @@ def compute_pos_weight(dataset: TrackerTrackSelectionDataset, config) -> torch.T
                 edges = config.loss.balancing.edges
                 mask = (pt > edges[0]) & (pt <= edges[-1])
             else:
-                raise ValueError(f"Unsupported loss balancing type: {config.loss.balancing.type}")
+                raise ValueError(
+                    f"Unsupported loss balancing type: {config.loss.balancing.type}"
+                )
 
             target = target[mask]
 
@@ -333,20 +344,20 @@ def run(
     Returns:
         None
     """
-    # ---------------------------------------------------------------------------
+    #---------------------------------------------------------------------------
     # Log
-    # ---------------------------------------------------------------------------
+    #---------------------------------------------------------------------------
     _logger.info(f"{config=}")
     _logger.info(f"{sys.argv=}")
 
-    # ---------------------------------------------------------------------------
+    #---------------------------------------------------------------------------
     # Run directory
-    # ---------------------------------------------------------------------------
+    #---------------------------------------------------------------------------
     run_dir = Path(config.paths.run_dir)
 
-    # ---------------------------------------------------------------------------
+    #---------------------------------------------------------------------------
     # Device setup
-    # ---------------------------------------------------------------------------
+    #---------------------------------------------------------------------------
     device = torch.device(config.torch.device)
 
     _logger.info(f"{device=}")
@@ -362,9 +373,9 @@ def run(
             f"Using device of type {device.type}. Make sure this is intentional and that the device is properly configured."
         )
 
-    # ---------------------------------------------------------------------------
+    #---------------------------------------------------------------------------
     # Setup resource trackers
-    # ---------------------------------------------------------------------------
+    #---------------------------------------------------------------------------
     trackers = TrackerCollection()
     trackers += MemoryTracker(output_dir=run_dir)
     if device.type == "cuda":
@@ -377,18 +388,18 @@ def run(
         trackers.track("gpu_warmup")
         _logger.info("GPU warmup completed.")
 
-    # ---------------------------------------------------------------------------
+    #---------------------------------------------------------------------------
     # Save config
-    # ---------------------------------------------------------------------------
+    #---------------------------------------------------------------------------
     with open(run_dir / "config.yaml", "w") as file:
         OmegaConf.save(config=config, f=file, resolve=True)
 
     aim_run.name = config.run
     aim_run["config"] = OmegaConf.to_container(config, resolve=True)
 
-    # ---------------------------------------------------------------------------
+    #---------------------------------------------------------------------------
     # PyTorch setup
-    # ---------------------------------------------------------------------------
+    #---------------------------------------------------------------------------
     torch.set_float32_matmul_precision(config.torch.float32_matmul_precision)
 
     if config.torch.num_threads is not None:
@@ -399,9 +410,9 @@ def run(
 
     set_seed(config.torch.seed)
 
-    # ---------------------------------------------------------------------------
+    #---------------------------------------------------------------------------
     # Instantiate model
-    # ---------------------------------------------------------------------------
+    #---------------------------------------------------------------------------
     model = instantiate(config.model)
     trackers.track("model_instantiated")
 
@@ -412,10 +423,10 @@ def run(
     with open(run_dir / "model-summary.txt", "w") as file:
         file.write(f"{model_statistics}\n\nModel architecture:\n{model}")
 
-    # ---------------------------------------------------------------------------
+    #---------------------------------------------------------------------------
     # Model compilation
     # FIXME: failed to compile the model with torch 2.10.0 on khu
-    # ---------------------------------------------------------------------------
+    #---------------------------------------------------------------------------
     if config.torch.compile:
         _logger.warning(
             "Model compilation might cause many issues. Make sure to test the compiled model thoroughly before using it for training."
@@ -427,9 +438,9 @@ def run(
         compiled_model = None
         _logger.info("Model compilation is disabled. Using original model.")
 
-    # ---------------------------------------------------------------------------
+    #---------------------------------------------------------------------------
     # Wrap model with TensorDictModule to handle input and output keys
-    # ---------------------------------------------------------------------------
+    #---------------------------------------------------------------------------
 
     td_model = TensorDictModule(
         module=(compiled_model if compiled_model is not None else model),
@@ -460,9 +471,9 @@ def run(
     trackers.track("val_set_instantiated")
     _logger.info(f"Number of validation examples: {len(val_set)}")
 
-    # ---------------------------------------------------------------------------
+    #---------------------------------------------------------------------------
     # Preprocessing
-    # ---------------------------------------------------------------------------
+    #---------------------------------------------------------------------------
     preprocessing = configure_preprocessing(config.data)
 
     train_set.apply_(preprocessing)
@@ -471,9 +482,9 @@ def run(
     val_set.apply_(preprocessing)
     trackers.track("preprocessing validation set completed")
 
-    # ---------------------------------------------------------------------------
+    #---------------------------------------------------------------------------
     # Data loaders
-    # ---------------------------------------------------------------------------
+    #---------------------------------------------------------------------------
     pin_memory = config.data_load.pin_memory and (device.type == "cuda")
     _logger.info(f"{pin_memory=}")
 
@@ -500,9 +511,9 @@ def run(
     )
     _logger.info(f"Number of validation batches: {len(val_loader)}")
 
-    # ---------------------------------------------------------------------------
+    #---------------------------------------------------------------------------
     # criterion
-    # ---------------------------------------------------------------------------
+    #---------------------------------------------------------------------------
     if config.loss.pos_weight == "auto":
         pos_weight = compute_pos_weight(train_set, config)
     elif isinstance(config.loss.pos_weight, (int, float)):
@@ -519,9 +530,9 @@ def run(
 
     _logger.info(f"{criterion=}")
 
-    # ---------------------------------------------------------------------------
+    #---------------------------------------------------------------------------
     # Optimization
-    # ---------------------------------------------------------------------------
+    #---------------------------------------------------------------------------
     optimizer = configure_optimizer(
         model=model,
         lr=config.optim.lr,
@@ -531,9 +542,9 @@ def run(
     )
     _logger.info(f"{optimizer=}")
 
-    # ---------------------------------------------------------------------------
+    #---------------------------------------------------------------------------
     # Learning rate scheduler
-    # ---------------------------------------------------------------------------
+    #---------------------------------------------------------------------------
     lr_scheduler = configure_lr_scheduler(
         optimizer=optimizer,
         num_steps_per_epoch=len(train_loader),
@@ -544,9 +555,9 @@ def run(
         annealing_eta_min_factor=config.optim.annealing.eta_min_factor,
     )
 
-    # ---------------------------------------------------------------------------
+    #---------------------------------------------------------------------------
     # GPU setup
-    # ---------------------------------------------------------------------------
+    #---------------------------------------------------------------------------
     _logger.debug("Moving model and criterion to device...")
 
     trackers.track("before_move_to_device")
@@ -556,9 +567,9 @@ def run(
 
     trackers.track("after_move_to_device")
 
-    # ---------------------------------------------------------------------------
+    #---------------------------------------------------------------------------
     # Mixed precision setup
-    # ---------------------------------------------------------------------------
+    #---------------------------------------------------------------------------
     if config.torch.precision == "float32":
         _logger.info("Using full precision (float32) for training.")
         amp_context = nullcontext()
@@ -568,14 +579,14 @@ def run(
     else:
         raise ValueError(f"Unsupported precision: {config.torch.precision}")
 
-    # ---------------------------------------------------------------------------
+    #---------------------------------------------------------------------------
     # Global state setup
-    # ---------------------------------------------------------------------------
+    #---------------------------------------------------------------------------
     global_state = GlobalState()
 
-    # ---------------------------------------------------------------------------
+    #---------------------------------------------------------------------------
     # Checkpointing setup
-    # ---------------------------------------------------------------------------
+    #---------------------------------------------------------------------------
     ckpt_dir = run_dir / "checkpoints"
 
     model_checkpoint = ModelCheckpoint(
@@ -590,9 +601,9 @@ def run(
         output_dir=ckpt_dir,
     )
 
-    # ---------------------------------------------------------------------------
+    #---------------------------------------------------------------------------
     # Training loop
-    # ---------------------------------------------------------------------------
+    #---------------------------------------------------------------------------
 
     trackers.track("training_loop_start")
 
@@ -652,17 +663,17 @@ def run(
 
     trackers.track("training_loop_end")
 
-    # ---------------------------------------------------------------------------
+    #---------------------------------------------------------------------------
     # Load best checkpoint
-    # ---------------------------------------------------------------------------
+    #---------------------------------------------------------------------------
 
     checkpoint = torch.load(model_checkpoint.best_path)
     model.load_state_dict(checkpoint["model"])
     del checkpoint
 
-    # ---------------------------------------------------------------------------
+    #---------------------------------------------------------------------------
     # Run final evaluation on validation set with best model checkpoint
-    # ---------------------------------------------------------------------------
+    #---------------------------------------------------------------------------
     #
     # # TODO:
     # result = validate(
