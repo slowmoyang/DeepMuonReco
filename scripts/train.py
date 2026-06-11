@@ -20,6 +20,7 @@ from tensordict.nn import TensorDictModule
 
 from torchmetrics.aggregation import MeanMetric
 from torchmetrics.classification import BinaryAUROC
+from torchmetrics.classification import BinarySpecificityAtSensitivity
 
 import torchinfo
 
@@ -230,6 +231,13 @@ def validate(
     h_sig = Hist.new.Reg(40, 0, 1).Double()
     h_bkg = h_sig.copy()
 
+    # specificity = true negative rate = background rejection rate
+    # sensitivity = true positive rate = signal efficiency
+    sas_dict = {
+        key: BinarySpecificityAtSensitivity(min_sensitivity=0.99_9, thresholds=None)
+        for key in ['pt_0p5_3', 'pt_3_inf']
+    }
+
     #---------------------------------------------------------------------------
     #
     #---------------------------------------------------------------------------
@@ -248,10 +256,15 @@ def validate(
             preds = logits.sigmoid()
             loss = criterion(input=logits, target=target)
 
+        #-----------------------------------------------------------------------
+        #
+        #-----------------------------------------------------------------------
+        batch = batch.cpu()
         loss = loss.float().cpu()
         preds = preds.float().cpu()
         target = target.long().cpu()
-        pt = batch["tracker_track_pt"][mask].float().cpu()
+        mask = mask.cpu()
+        pt = batch["tracker_track_pt"][mask].float()
 
         mask_pt_0p5_3 = (pt > 0.5) & (pt <= 3)
         mask_pt_3_inf = pt > 3
@@ -262,6 +275,9 @@ def validate(
         metric_dict["auroc_pt_3_inf"].update(
             preds=preds[mask_pt_3_inf], target=target[mask_pt_3_inf]
         )
+
+        sas_dict['pt_0p5_3'].update(preds=preds[mask_pt_0p5_3], target=target[mask_pt_0p5_3])
+        sas_dict['pt_3_inf'].update(preds=preds[mask_pt_3_inf], target=target[mask_pt_3_inf])
 
         # numpy
         sig_mask = target == 1
@@ -274,6 +290,9 @@ def validate(
     #
     #---------------------------------------------------------------------------
     result = {name: metric.compute().item() for name, metric in metric_dict.items()}
+    for key, value in sas_dict.items():
+        tnr, threshold = value.compute()
+        result[f"tnr_at_tpr_99p9_{key}"] = tnr
 
     # NOTE:
     fig, ax = plt.subplots()
