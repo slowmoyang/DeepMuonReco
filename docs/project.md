@@ -102,9 +102,9 @@ and therefore one classification score, for every eligible tracker track.
 
 The current training workflow supports binary cross-entropy, automatic positive
 class weighting, and momentum-bin loss balancing. Validation currently records
-losses, score distributions, and AUROC in selected track-momentum regions.
-`scripts/predict.py` writes per-event, per-track scores to HDF5 for downstream
-studies.
+losses, score distributions, AUROC, and TNR at a minimum TPR of 99.9% in
+selected track-momentum regions. `scripts/predict.py` writes per-event,
+per-track scores to HDF5 for downstream studies.
 
 These implementations are research prototypes. No architecture has been
 selected for production use.
@@ -112,23 +112,35 @@ selected for production use.
 ## Evaluation
 
 Model quality alone is insufficient: the final decision must account for both
-physics performance and reconstruction cost. Evaluation should scan the score
-threshold and measure:
+physics performance and reconstruction cost. The primary model-comparison
+metric is the maximum true negative rate (TNR) at a measured true positive rate
+(TPR) of at least 99.9%, computed globally over all eligible tracks. This
+prioritizes preserving tracker-muon efficiency while measuring how many
+negative tracks can avoid extrapolation. The corresponding validation-set score
+threshold is a candidate global operating threshold.
+
+Current validation also computes independently optimized TNR values in
+track-momentum regions. These are diagnostics and do not describe performance
+at one global threshold. See [Primary Evaluation Metric](metric.md) for metric
+definitions, TorchMetrics behavior, and the evaluation procedure.
+
+Evaluation should additionally scan or apply the selected score threshold and
+measure:
 
 - Tracker-muon efficiency and efficiency loss relative to the unfiltered
   `MuonIdProducer` workflow.
-- Background-track rejection and the fraction of eligible tracks sent to
+- TNR, false positive rate, and the fraction of eligible tracks sent to
   extrapolation.
-- Efficiency and rejection versus track transverse momentum, pseudorapidity,
-  and event pileup.
+- Fixed-threshold efficiency and TNR versus track transverse momentum,
+  pseudorapidity, and event pileup.
 - Model inference latency, memory use, and scaling with event occupancy.
 - `MuonIdProducer` timing with and without preselection.
 - Net end-to-end reconstruction speedup after including inference cost.
 
-The threshold and model should be selected using the efficiency-versus-timing
-tradeoff, not classification metrics such as AUROC alone. Quantitative
-acceptance targets will be defined after representative Phase-2 timing and
-efficiency studies are available.
+TNR at a minimum TPR of 99.9% is the primary classification metric for comparing
+models, but it does not directly measure timing reduction. The final production
+threshold and model must be selected using both physics performance and
+end-to-end timing, not classification metrics such as AUROC alone.
 
 ## Current Status and Future Work
 
