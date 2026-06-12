@@ -292,7 +292,7 @@ def validate(
     result = {name: metric.compute().item() for name, metric in metric_dict.items()}
     for key, value in sas_dict.items():
         tnr, threshold = value.compute()
-        result[f"tnr_at_tpr_99p9_{key}"] = tnr
+        result[f"tnr_at_tpr_99p9_{key}"] = tnr.item()
 
     # NOTE:
     fig, ax = plt.subplots()
