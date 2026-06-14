@@ -19,7 +19,7 @@ from torch.utils.data import DataLoader
 from tensordict.nn import TensorDictModule
 
 from torchmetrics.aggregation import MeanMetric
-from torchmetrics.classification import BinaryAUROC
+#from torchmetrics.classification import BinaryAUROC
 from torchmetrics.classification import BinarySpecificityAtSensitivity
 
 import torchinfo
@@ -225,7 +225,7 @@ def validate(
         "loss": MeanMetric(),
         "loss_pt_0p5_3": MeanMetric(),
         "loss_pt_3_inf": MeanMetric(),
-        "auroc_pt_3_inf": BinaryAUROC(thresholds=1_000),
+        #"auroc_pt_3_inf": BinaryAUROC(thresholds=1_000),
     }
 
     h_sig = Hist.new.Reg(40, 0, 1).Double()
@@ -272,9 +272,9 @@ def validate(
         metric_dict["loss"].update(loss)
         metric_dict["loss_pt_0p5_3"].update(loss[mask_pt_0p5_3])
         metric_dict["loss_pt_3_inf"].update(loss[mask_pt_3_inf])
-        metric_dict["auroc_pt_3_inf"].update(
-            preds=preds[mask_pt_3_inf], target=target[mask_pt_3_inf]
-        )
+        # metric_dict["auroc_pt_3_inf"].update(
+        #     preds=preds[mask_pt_3_inf], target=target[mask_pt_3_inf]
+        # )
 
         sas_dict['pt_0p5_3'].update(preds=preds[mask_pt_0p5_3], target=target[mask_pt_0p5_3])
         sas_dict['pt_3_inf'].update(preds=preds[mask_pt_3_inf], target=target[mask_pt_3_inf])
