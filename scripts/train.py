@@ -190,12 +190,15 @@ def train(
         global_state.step += 1
 
         aim_run.track(
-            value=loss.float().item(),
-            name="loss",
+            value={
+                'loss': loss.float().item(),
+                'lr': lr_scheduler.get_last_lr()[0],
+            },
             epoch=global_state.epoch,
             step=global_state.step,
             context={"subset": "train"},
         )
+
 
 
 #===============================================================================
@@ -289,7 +292,7 @@ def validate(
     #---------------------------------------------------------------------------
     #
     #---------------------------------------------------------------------------
-    result = {name: metric.compute().item() for name, metric in metric_dict.items()}
+    result: dict[str, Any] = {name: metric.compute().item() for name, metric in metric_dict.items()}
     for key, value in sas_dict.items():
         tnr, threshold = value.compute()
         result[f"tnr_at_tpr_99p9_{key}"] = tnr.item()
@@ -302,7 +305,7 @@ def validate(
     ax.set_xlabel("Score")
     ax.set_ylabel("Density")
     ax.legend()
-    result["dist_score"] = fig
+    result["dist_score"] = Image(fig)
 
     return result
 
@@ -662,16 +665,13 @@ def run(
         _logger.debug(
             f"Logging validation results to Aim and checkpointing if necessary..."
         )
-        for key, value in val_result.items():
-            if isinstance(value, plt.Figure):
-                value = Image(value)
-            aim_run.track(
-                value=value,
-                name=key,
-                epoch=global_state.epoch,
-                step=global_state.step,
-                context={"subset": "val"},
-            )
+
+        aim_run.track(
+            value=val_result,
+            epoch=global_state.epoch,
+            step=global_state.step,
+            context={"subset": "val"},
+        )
         plt.close("all")
         model_checkpoint.step(metric=val_result)
         _logger.info(f"{global_state}: {val_result}")
