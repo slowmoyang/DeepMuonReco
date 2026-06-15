@@ -63,7 +63,9 @@ def make_dummy_inputs() -> tuple[torch.Tensor, ...]:
     Masks are all-True: a fully-masked object type yields a softmax over an empty
     set inside the attention encoders, producing NaNs.
     """
-    batch_size = 1
+    # batch_size must be >= 2: torch.export 0/1-specializes size-1 dims, which
+    # would freeze the dynamic "batch" axis to a static 1 in the exported graph.
+    batch_size = 2
     len_trk, len_dt, len_csc, len_gem = 500, 20, 30, 40
 
     def feats(length: int, dim: int) -> torch.Tensor:
