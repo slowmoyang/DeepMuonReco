@@ -35,6 +35,7 @@ dependencies = [
     "psutil>=7.2.2",
     "humanize>=4.15.0",
     "rich-argparse>=1.8.0",
+    "onnxscript>=0.7.0",
 ]
 
 [dependency-groups]
