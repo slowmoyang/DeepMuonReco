@@ -36,6 +36,7 @@ dependencies = [
     "humanize>=4.15.0",
     "rich-argparse>=1.8.0",
     "onnxscript>=0.7.0",
+    "tabulate>=0.10.0",
 ]
 
 [dependency-groups]
