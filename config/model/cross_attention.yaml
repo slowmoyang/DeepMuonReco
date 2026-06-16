@@ -1,0 +1,17 @@
+_target_: muonly.nn.CrossAttentionModel
+
+tracker_track_dim: ${data.tracker_track.dim}
+dt_segment_dim: ${data.dt_segment.dim}
+csc_segment_dim: ${data.csc_segment.dim}
+gem_segment_dim: ${data.gem_segment.dim}
+rpc_hit_dim: ${data.rpc_hit.dim}
+gem_hit_dim: ${data.gem_hit.dim}
+
+output_dim: 1
+
+model_dim: 128
+num_heads: 8
+encoder_num_layers: 2
+decoder_num_layers: 4
+widening_factor: 4
+dropout: 0
