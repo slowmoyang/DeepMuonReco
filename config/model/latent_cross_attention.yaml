@@ -12,8 +12,8 @@ output_dim: 1
 model_dim: 128
 num_heads: 8
 muon_det_latent_len: 64
-muon_det_num_processors: 2
+muon_det_num_processors: 1
 muon_det_processor_block_weight_sharing: false
-decoder_num_layers: 4
+decoder_num_layers: 1
 widening_factor: 4
 dropout: 0

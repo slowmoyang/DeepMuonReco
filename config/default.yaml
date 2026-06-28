@@ -1,7 +1,7 @@
 # @package _global_
 
 defaults:
-  - model: latent_attention
+  - model: latent_cross_attention
   - data: mu2030pu
   - data_load: default
   - optim: default
