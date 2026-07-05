@@ -7,6 +7,7 @@ from typing import Any
 from contextlib import nullcontext
 import secrets
 import sys
+import json
 
 import torch
 from torch import Tensor
@@ -39,6 +40,7 @@ from tqdm import TqdmExperimentalWarning
 from hist import Hist
 
 import matplotlib.pyplot as plt
+from matplotlib.figure import Figure
 import mplhep as mh
 
 from muonly.data.datasets import TrackerTrackSelectionDataset
@@ -51,6 +53,7 @@ from muonly.callbacks import MemoryTracker
 from muonly.callbacks import CUDAMemoryTracker
 from muonly.callbacks import TrackerCollection
 from muonly.utils.reproducibility import set_seed
+from muonly.utils.logging import is_json_serializable
 
 mh.style.use("CMS")
 
@@ -693,28 +696,40 @@ def run(
     #---------------------------------------------------------------------------
     # Run final evaluation on validation set with best model checkpoint
     #---------------------------------------------------------------------------
-    #
-    # # TODO:
-    # result = validate(
-    #     model=td_model,
-    #     criterion=criterion,
-    #     data_loader=val_loader,
-    #     device=device,
-    #     config=config,
-    #     amp_context=amp_context,
-    # )
-    #
-    # for key, value in result.items():
-    #     if isinstance(value, plt.Figure):
-    #         value = Image(value)
-    #     aim_run.track(
-    #         value=value,
-    #         name=key,
-    #         epoch=global_state.epoch,
-    #         step=global_state.step,
-    #         context={"subset": "val"},
-    #     )
-    # plt.close("all")
+
+    # TODO:
+    result = validate(
+        model=td_model,
+        criterion=criterion,
+        data_loader=val_loader,
+        device=device,
+        config=config,
+        amp_context=amp_context,
+    )
+    aim_run.track(
+        value=result,
+        epoch=global_state.epoch,
+        step=global_state.step,
+        context={"subset": "best_val"},
+    )
+    plt.close("all")
+
+    # pick python native types to save results to json
+    serializable_result = {}
+    for key, value in result.items():
+        if is_json_serializable(value):
+            serializable_result[key] = value
+        elif isinstance(value, Tensor):
+            serializable_result[key] = value.tolist()
+        else:
+            _logger.debug(f"Skipping non-serializable result key: {key} with type {type(value)}")
+
+    result_dir = run_dir / "results" / "best"
+    result_dir.mkdir(parents=True, exist_ok=True)
+    with open(result_dir / "val.json", "w") as file:
+        json.dump(serializable_result, file, indent=4)
+
+
 
 
 @hydra.main(

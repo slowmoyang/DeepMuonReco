@@ -3,6 +3,7 @@ import time
 from getpass import getuser
 from pathlib import Path
 from socket import gethostname
+import json
 from contextlib import contextmanager
 from aim.pytorch_lightning import AimLogger
 from omegaconf import OmegaConf
@@ -51,3 +52,11 @@ def log_everything(logger: AimLogger, config: DictConfig, model, output_dir: Pat
         logger.experiment.description = description
     elif description := config.run.description:
         logger.experiment.description = description
+
+# FIXME:
+def is_json_serializable(obj) -> bool:
+    try:
+        json.dumps(obj)
+        return True
+    except (TypeError, OverflowError):
+        return False
