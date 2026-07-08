@@ -801,6 +801,8 @@ def run(
         _logger.info(f"Starting epoch {epoch}/{config.optim.max_epochs}...")
         global_state.epoch = epoch
 
+        aim_run.track(value=epoch, name='epoch', step=global_state.step, epoch=global_state.epoch)
+
         if epoch >= 1:
             _logger.info("Running training...")
             train(
