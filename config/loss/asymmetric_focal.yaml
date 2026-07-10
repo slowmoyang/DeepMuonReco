@@ -1,0 +1,8 @@
+pos_weight: auto
+
+criterion:
+  _target_: muonly.nn.AsymmetricFocalLoss
+  gamma_pos: 2.0
+  gamma_neg: 0.0
+  clip: 0.0
+  reduction: none

@@ -1,0 +1,13 @@
+pos_weight: auto
+
+criterion:
+  _target_: muonly.nn.BinaryFocalLoss
+  gamma: 2.0
+  reduction: none
+
+aux:
+  - _target_: muonly.nn.TopKPairwiseRankingLoss
+    k_pos: 32
+    k_neg: 32
+    margin: 1.0
+    weight: 0.1

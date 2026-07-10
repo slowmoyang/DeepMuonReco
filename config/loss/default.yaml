@@ -1,1 +1,5 @@
 pos_weight: auto
+
+criterion:
+  _target_: torch.nn.BCEWithLogitsLoss
+  reduction: none

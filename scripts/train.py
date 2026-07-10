@@ -123,35 +123,28 @@ class GlobalState:
 # ===============================================================================
 
 
-def compute_loss(batch, criterion, config: DictConfig) -> Tensor:
+def compute_loss(batch, criterion, aux_terms: nn.ModuleList) -> dict[str, Tensor]:
+    """Compute the total training loss and its components.
+
+    The base criterion is averaged over all valid tracks. Each auxiliary term
+    is evaluated on the same masked logits/target and added to the total with
+    its own ``weight``. Returns a dict with ``loss`` (total, for backward),
+    ``loss_base``, and one ``loss_<name>`` entry per auxiliary term.
+    """
     mask = batch["tracker_track_data_mask"]
-    logits = batch["logits"]
-    target = batch["target"].float()
-    pt = batch["tracker_track_pt"]
+    logits = batch["logits"][mask]
+    target = batch["target"][mask].float()
 
-    if config.loss.get("balancing") is not None:
-        if config.loss.balancing.type == "pt_bin":
-            pt_edges = config.loss.balancing.edges
-            loss_list = []
-            for pt_low, pt_high in zip(pt_edges[:-1], pt_edges[1:]):
-                pt_low = pt_low or 0
-                pt_high = pt_high or float("inf")
+    base_loss = criterion(input=logits, target=target).mean()
 
-                bin_mask = mask & (pt > pt_low) & (pt <= pt_high)
-                loss_list.append(
-                    criterion(input=logits[bin_mask], target=target[bin_mask]).mean()
-                )
-            loss = torch.stack(loss_list).mean()
-        else:
-            raise ValueError(
-                f"Unsupported loss balancing type: {config.loss.balancing.type}"
-            )
-    else:
-        logits = batch["logits"][mask]
-        target = batch["target"][mask].float()
-        loss = criterion(input=logits, target=target)
-        loss = loss.mean()
-    return loss
+    components = {"loss_base": base_loss}
+    total = base_loss
+    for term in aux_terms:
+        value = term(input=logits, target=target)
+        components[f"loss_{term.name}"] = value
+        total = total + term.weight * value
+    components["loss"] = total
+    return components
 
 
 # ===============================================================================
@@ -162,6 +155,7 @@ def compute_loss(batch, criterion, config: DictConfig) -> Tensor:
 def train(
     model,
     criterion: nn.Module,
+    aux_terms: nn.ModuleList,
     data_loader: DataLoader,
     optimizer: AdamW,
     lr_scheduler: SequentialLR,
@@ -185,7 +179,10 @@ def train(
 
         with amp_context:
             batch = model(batch)
-            loss = compute_loss(batch=batch, criterion=criterion, config=config)
+            loss_dict = compute_loss(
+                batch=batch, criterion=criterion, aux_terms=aux_terms
+            )
+            loss = loss_dict["loss"]
 
         loss.backward()
         clip_grad_norm_(
@@ -199,7 +196,7 @@ def train(
 
         aim_run.track(
             value={
-                "loss": loss.float().item(),
+                **{key: value.float().item() for key, value in loss_dict.items()},
                 "lr": lr_scheduler.get_last_lr()[0],
             },
             epoch=global_state.epoch,
@@ -481,26 +478,12 @@ def evaluate(
 # ===============================================================================
 
 
-def compute_pos_weight(dataset: TrackerTrackSelectionDataset, config) -> Tensor:
+def compute_pos_weight(dataset: TrackerTrackSelectionDataset) -> Tensor:
     pos_count = 0
     neg_count = 0
 
     for example in tqdm.rich.tqdm(dataset, desc="Computing pos_weight"):
         target = example["target"]
-
-        if config.loss.get("balancing") is not None:
-            if config.loss.balancing.type == "pt_bin":
-                pt = example["tracker_track_pt"]
-                # The loss only covers tracks within the pt bin range, so count
-                # over the union of the bins defined by ``edges``.
-                edges = config.loss.balancing.edges
-                mask = (pt > edges[0]) & (pt <= edges[-1])
-            else:
-                raise ValueError(
-                    f"Unsupported loss balancing type: {config.loss.balancing.type}"
-                )
-
-            target = target[mask]
 
         pos = target.long().sum().item()
         total = target.numel()
@@ -705,7 +688,7 @@ def run(
     # criterion
     # ---------------------------------------------------------------------------
     if config.loss.pos_weight == "auto":
-        pos_weight = compute_pos_weight(train_set, config)
+        pos_weight = compute_pos_weight(train_set)
     elif isinstance(config.loss.pos_weight, (int, float)):
         pos_weight = torch.tensor(config.loss.pos_weight)
     else:
@@ -713,12 +696,14 @@ def run(
 
     _logger.info(f"Positive weight: {pos_weight.item():.4f}")
 
-    criterion = nn.BCEWithLogitsLoss(
-        pos_weight=pos_weight,
-        reduction="none",
+    criterion = instantiate(config.loss.criterion, pos_weight=pos_weight)
+
+    aux_terms = nn.ModuleList(
+        instantiate(aux_config) for aux_config in (config.loss.get("aux") or [])
     )
 
     _logger.info(f"{criterion=}")
+    _logger.info(f"{aux_terms=}")
 
     # ---------------------------------------------------------------------------
     # Optimization
@@ -754,6 +739,7 @@ def run(
 
     model = model.to(device)
     criterion = criterion.to(device)
+    aux_terms = aux_terms.to(device)
 
     trackers.track("after_move_to_device")
 
@@ -808,6 +794,7 @@ def run(
             train(
                 model=td_model,
                 criterion=criterion,
+                aux_terms=aux_terms,
                 data_loader=train_loader,
                 optimizer=optimizer,
                 lr_scheduler=lr_scheduler,

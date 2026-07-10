@@ -1,0 +1,6 @@
+pos_weight: auto
+
+criterion:
+  _target_: muonly.nn.BinaryFocalLoss
+  gamma: 2.0
+  reduction: none
