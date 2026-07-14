@@ -56,11 +56,23 @@ not necessarily TNR at exactly 99.9% TPR.
 
 ### Why Validation Uses Histograms
 
-An exact specificity-at-sensitivity metric uses every distinct prediction as a
-candidate threshold. It must therefore retain all predictions and targets until
-the end of validation, making its state grow linearly with the number of tracks.
-The validation sample contains many tracks, so this unbounded state can consume
-substantial accelerator memory and eventually cause an out-of-memory failure.
+The histogram-based implementation was introduced after the exact TorchMetrics
+calculation failed on a validation sample containing 68,608,145 tracks. The
+failure occurred while `_binary_clf_curve` was sorting and reindexing the stored
+predictions:
+
+```text
+File ".../torchmetrics/functional/classification/precision_recall_curve.py", line 62, in _binary_clf_curve
+    preds = preds[desc_score_indices]
+            ~~~~~^^^^^^^^^^^^^^^^^^^^
+IndexError: index 144115188090131662 is out of bounds for dimension 0 with size 68608145
+```
+
+The exact calculation retains every prediction and target until the end of
+validation, then sorts the full prediction array to use every distinct score as
+a candidate threshold. At this sample size, that exact sorting and reindexing
+path produced the error above. Avoiding this large raw-state operation was the
+original reason for replacing it with a histogram-based calculation.
 
 The histogram-based metric instead accumulates positive and negative score
 counts in 100,001 uniformly spaced bins over `[0, 1]`. At the end of validation,
