@@ -1,6 +1,6 @@
 # Ablation Study: Loss Functions for Hard-Positive Emphasis
 
-Status: **planned** (fill in results as runs complete)
+Status: **in progress** (Phase 1: 7/8 runs evaluated)
 
 This study evaluates the loss functions provided by the config-driven loss
 framework (`docs/loss.md`, `config/loss/*.yaml`, `muonly.nn.losses`) against
@@ -91,19 +91,62 @@ Results (validation, best checkpoint):
 
 | # | `tnr_at_tpr_0p9999` | threshold | AUROC | run dir / Aim hash |
 | --- | --- | --- | --- | --- |
-| 1.0 | | | | |
-| 1.1 | | | | |
-| 1.2 | | | | |
-| 1.3 | | | | |
-| 1.4 | | | | |
-| 1.5 | | | | |
-| 1.6 | | | | |
-| 1.7 | | | | |
+| 1.0 | 0.108602 | 0.018311 | 0.812964 | `logs/phase1/run-00_bce_00` |
+| 1.1 | 0.099902 | 0.096680 | 0.802574 | `logs/phase1/run-01_focal_gamma-1p0_00` |
+| 1.2 | 0.137747 | 0.157227 | 0.814449 | `logs/phase1/run-02_focal_gamma-2p0_00` |
+| 1.3 | 0.135111 | 0.221680 | 0.807183 | `logs/phase1/run-03_focal_gamma-3p0_00` |
+| 1.4 | 0.128174 | 0.015442 | 0.786776 | `logs/phase1/run-04_asymmetric-focal_gamma-pos-2p0_gamma-neg-0p0_00` |
+| 1.5 | failed (exit 139) | — | — | `logs/phase1/run-05_asymmetric-focal_gamma-pos-3p0_gamma-neg-0p0_00` |
+| 1.6 | 0.135073 | 0.080566 | 0.801179 | `logs/phase1/run-06_asymmetric-focal_gamma-pos-2p0_gamma-neg-1p0_00` |
+| 1.7 | **0.142550** | 0.104980 | 0.813670 | `logs/phase1/run-07_asymmetric-focal_gamma-pos-2p0_gamma-neg-1p0_clip-0p05_00` |
+
+**Status (2026-07-14):** Seven runs completed. Run 1.5 failed with exit
+code 139 before final evaluation and has no `results/best/sas.json`.
+Among the completed runs, the provisional **C\*** is ASL γ+=2, γ−=1 with
+clip=0.05 (run 1.7). The best focal result (γ=2, run 1.2) exceeds BCE by
+0.029145 absolute TNR at the target operating point, so the focal family
+does beat BCE in this seed. Rerun 1.5 before declaring the Phase-1 winner.
 
 Outcome: pick the best criterion **C\*** (highest `tnr_at_tpr_0p9999`; break
 ties toward the simpler criterion). Also note whether the focal family beats
 BCE at all — if not, the aux terms in Phase 2 should be tested on top of BCE
 instead.
+
+### Additional 200-epoch loss-ablation runs
+
+The separate `logs/loss-ablation/` runs used `optim.max_epochs=200` and
+selected the best validation checkpoint over that longer schedule. They are
+contextual results rather than a controlled extension of Phase 1: seeds were
+left at `torch.seed=${randbits:}`, and the loss configurations differ. The
+matrix covers BCE; ASL γ+=3, γ−=0; focal γ=1; focal γ=1 with
+`pos_weight=50`; and focal γ=2 plus minpos with auxiliary weight 0.3.
+
+Results (validation, best checkpoint):
+
+| Run | `tnr_at_tpr_0p9999` | threshold | AUROC |
+| --- | --- | --- | --- |
+| `asymmetric-focal_gamma-pos-3p0_00` | 0.365657 | 0.001167 | 0.924513 |
+| `asymmetric-focal_gamma-pos-3p0_01` | 0.369624 | 0.000710 | 0.927484 |
+| `asymmetric-focal_gamma-pos-3p0_02` | 0.399277 | 0.002258 | 0.926901 |
+| `bce_00` | 0.399300 | 0.000938 | 0.933311 |
+| `bce_01` | 0.383804 | 0.000805 | 0.930611 |
+| `bce_02` | 0.424703 | 0.000969 | 0.937177 |
+| `focal-minpos_aux-0-weight-0p3_00` | 0.000007 | 0.558594 | 0.750243 |
+| `focal-minpos_aux-0-weight-0p3_02` | 0.000001 | 0.554688 | 0.767235 |
+| `focal_gamma-1p0_00` | 0.409049 | 0.014038 | 0.930346 |
+| `focal_gamma-1p0_01` | 0.411936 | 0.016357 | 0.933171 |
+| `focal_gamma-1p0_02` | 0.411412 | 0.018311 | 0.932918 |
+| `focal_gamma-1p0_pos-weight-50_00` | **0.455428** | 0.021973 | **0.941163** |
+| `focal_gamma-1p0_pos-weight-50_01` | 0.430989 | 0.024048 | 0.936734 |
+
+Thirteen of the fifteen run directories contain a final `sas.json`.
+`focal-minpos_aux-0-weight-0p3_01` and
+`focal_gamma-1p0_pos-weight-50_02` have no final result. Among available
+runs, focal γ=1 with `pos_weight=50` is strongest; its two completed
+replicas reach TNR 0.455428 and 0.430989. The three focal γ=1 replicas are
+stable at 0.409049–0.411936, while the minpos runs have near-zero TNR. Because
+training length, seed, and loss hyperparameters differ, these values should
+not be used to select **C\*** from the controlled Phase-1 table.
 
 ## Phase 2 — Auxiliary batch-level terms
 
