@@ -40,7 +40,7 @@ The validation metric can be computed with:
 ```python
 BinarySpecificityAtSensitivity(
     min_sensitivity=0.999,
-    thresholds=None,
+    thresholds=100_001,
 )
 ```
 
@@ -52,10 +52,28 @@ curve and returns:
 2. The corresponding score threshold.
 
 The returned value is therefore TNR at **TPR greater than or equal to 99.9%**,
-not necessarily TNR at exactly 99.9% TPR. With `thresholds=None`, TorchMetrics
-uses thresholds derived from all observed validation scores. This gives the
-non-binned result but retains all predictions and targets until the metric is
-computed, requiring memory proportional to the number of evaluated tracks.
+not necessarily TNR at exactly 99.9% TPR.
+
+### Why Validation Uses Histograms
+
+An exact specificity-at-sensitivity metric uses every distinct prediction as a
+candidate threshold. It must therefore retain all predictions and targets until
+the end of validation, making its state grow linearly with the number of tracks.
+The validation sample contains many tracks, so this unbounded state can consume
+substantial accelerator memory and eventually cause an out-of-memory failure.
+
+The histogram-based metric instead accumulates positive and negative score
+counts in 100,001 uniformly spaced bins over `[0, 1]`. At the end of validation,
+reverse cumulative sums over these histograms give the true-positive and
+false-positive counts at every threshold. Its state is fixed by the number of
+bins rather than the number of evaluated tracks, so memory remains bounded
+throughout validation and histogram states can be summed across workers.
+
+This bounded-memory behavior comes with a controlled approximation: thresholds
+have a score-grid spacing of `1e-5`, so the reported TNR and operating threshold
+are quantized to that resolution. This tradeoff is appropriate for repeated
+validation during training; final fixed-threshold evaluation still reports the
+rates measured directly on the independent evaluation sample.
 
 The headline metric should be computed once over all tracks that pass the
 standard `MuonIdProducer` good-track selection. Its returned threshold is a

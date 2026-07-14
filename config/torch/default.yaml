@@ -3,6 +3,7 @@ num_interop_threads: 1
 float32_matmul_precision: high
 device: cuda:0
 precision: bfloat16
+sdpa_backend: math
 seed: ${randbits:}
 compile: false
 detect_anomaly: false

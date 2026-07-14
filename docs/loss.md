@@ -2,8 +2,6 @@
 
 This document describes the config-driven loss framework used by
 `scripts/train.py` and the motivation behind the loss functions it provides.
-It implements Priority 1 of `docs/plan.md` ("Align the loss with the operating
-point").
 
 ## Motivation
 

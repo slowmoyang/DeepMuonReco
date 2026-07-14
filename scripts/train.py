@@ -24,7 +24,6 @@ from torchmetrics.aggregation import CatMetric, MeanMetric
 from torchmetrics.classification import (
     BinaryAUROC,
     BinaryROC,
-    BinarySpecificityAtSensitivity,
 )
 
 import torchinfo
@@ -58,6 +57,11 @@ from muonly.callbacks import TrackerCollection
 from muonly.utils.reproducibility import set_seed
 from muonly.utils.logging import is_json_serializable
 from muonly.utils.plot import Efficiency, save_figure
+from muonly.utils.sdpa import sdpa_kernel_context
+from muonly.nn.metrics import (
+    binary_specificity_at_sensitivity_metric,
+    validate_binary_metric_inputs,
+)
 
 mh.style.use("CMS")
 
@@ -239,10 +243,7 @@ def validate(
 
     # specificity = true negative rate = background rejection rate
     # sensitivity = true positive rate = signal efficiency
-    sas_metric = BinarySpecificityAtSensitivity(
-        min_sensitivity=0.9999,
-        thresholds=None,
-    )
+    sas_metric = binary_specificity_at_sensitivity_metric(min_sensitivity=0.9999)
 
     # ---------------------------------------------------------------------------
     #
@@ -279,6 +280,7 @@ def validate(
         metric_dict["loss_pt_0p5_3"].update(loss[mask_pt_0p5_3])
         metric_dict["loss_pt_3_inf"].update(loss[mask_pt_3_inf])
 
+        validate_binary_metric_inputs(preds=preds, target=target)
         sas_metric.update(preds=preds, target=target)
 
         # numpy
@@ -332,8 +334,8 @@ def evaluate(
     pt_cat = CatMetric()
     roc_metric_collection = MetricCollection(
         {
-            "roc": BinaryROC(thresholds=None),
-            "auroc": BinaryAUROC(thresholds=None),
+            "roc": BinaryROC(thresholds=None, compute_on_cpu=True),
+            "auroc": BinaryAUROC(thresholds=None, compute_on_cpu=True),
         },
         compute_groups=True,
     )
@@ -367,7 +369,7 @@ def evaluate(
         label_cat.update(labels)
         score_cat.update(scores)
         pt_cat.update(pt)
-        roc_metric_collection.update(preds=scores, target=labels)
+        roc_metric_collection.update(preds=scores.double(), target=labels.long())
 
     ############################################################################
     #
@@ -583,6 +585,11 @@ def run(
 
     set_seed(config.torch.seed)
 
+    # Validate backend selection before allocating datasets and model state.
+    with sdpa_kernel_context(device, config.torch.sdpa_backend):
+        pass
+    _logger.info(f"SDPA backend: {config.torch.sdpa_backend}")
+
     # ---------------------------------------------------------------------------
     # Instantiate model
     # ---------------------------------------------------------------------------
@@ -791,31 +798,33 @@ def run(
 
         if epoch >= 1:
             _logger.info("Running training...")
-            train(
-                model=td_model,
-                criterion=criterion,
-                aux_terms=aux_terms,
-                data_loader=train_loader,
-                optimizer=optimizer,
-                lr_scheduler=lr_scheduler,
-                device=device,
-                global_state=global_state,
-                aim_run=aim_run,
-                config=config,
-                amp_context=amp_context,
-            )
+            with sdpa_kernel_context(device, config.torch.sdpa_backend):
+                train(
+                    model=td_model,
+                    criterion=criterion,
+                    aux_terms=aux_terms,
+                    data_loader=train_loader,
+                    optimizer=optimizer,
+                    lr_scheduler=lr_scheduler,
+                    device=device,
+                    global_state=global_state,
+                    aim_run=aim_run,
+                    config=config,
+                    amp_context=amp_context,
+                )
             _logger.info("Training completed.")
             trackers.track(f"epoch_{epoch:06d}_train")
 
         _logger.info("Running validation...")
-        val_result = validate(
-            model=td_model,
-            criterion=criterion,
-            data_loader=val_loader,
-            device=device,
-            config=config,
-            amp_context=amp_context,
-        )
+        with sdpa_kernel_context(device, config.torch.sdpa_backend):
+            val_result = validate(
+                model=td_model,
+                criterion=criterion,
+                data_loader=val_loader,
+                device=device,
+                config=config,
+                amp_context=amp_context,
+            )
         _logger.info("Validation completed.")
         trackers.track(f"epoch_{epoch:06d}_val")
 
