@@ -148,20 +148,48 @@ stable at 0.409049–0.411936, while the minpos runs have near-zero TNR. Because
 training length, seed, and loss hyperparameters differ, these values should
 not be used to select **C\*** from the controlled Phase-1 table.
 
+### Phase 1 conclusion (provisional)
+
+At seed `20260710`, hard-example focusing improves the target operating-point
+metric over BCE. The current leader, ASL γ+=2, γ−=1 with clip=0.05, reaches
+TNR 0.142550: an absolute gain of 0.033948 (31.3% relative) over BCE. Focal
+γ=2 also improves on BCE by 0.029145 absolute TNR. The AUROC ordering does
+not match the target-metric ordering, reinforcing that **C\*** must be selected
+using `tnr_at_tpr_0p9999` rather than AUROC.
+
+This conclusion remains provisional because ASL γ+=3, γ−=0 (run 1.5) has
+no final evaluation. Rerun it before declaring **C\***. Until then, use the
+clipped-ASL leader as the provisional Phase-2 base. The uncontrolled 200-epoch
+runs suggest that training duration and `pos_weight` can materially affect the
+result, but they do not change the controlled Phase-1 selection.
+
 ## Phase 2 — Auxiliary batch-level terms
 
-Add tail-targeting aux terms on top of **C\*** (commands below assume
-C\* = `focal`; substitute the Phase-1 winner's overrides). Varies term type
-and mixing weight; 6 runs.
+Add tail-targeting aux terms on top of **C\***. Until run 1.5 is rerun, the
+commands use the provisional clipped-ASL leader through this validated Hydra
+override array:
+
+```bash
+CSTAR=(
+  loss.criterion._target_=muonly.nn.AsymmetricFocalLoss
+  '~loss.criterion.gamma'
+  +loss.criterion.gamma_pos=2.0
+  +loss.criterion.gamma_neg=1.0
+  +loss.criterion.clip=0.05
+)
+```
+
+If run 1.5 becomes the winner, update `CSTAR` before launching Phase 2. The
+phase varies term type and mixing weight; 6 runs.
 
 | # | Run | Command (append to `TRAIN`) |
 | --- | --- | --- |
-| 2.1 | minpos w=0.1 | `loss=focal_minpos` |
-| 2.2 | minpos w=0.3 | `loss=focal_minpos loss.aux.0.weight=0.3` |
-| 2.3 | minpos w=0.1, k=64 | `loss=focal_minpos loss.aux.0.k=64` |
-| 2.4 | rank w=0.1 | `loss=focal_rank` |
-| 2.5 | rank w=0.3 | `loss=focal_rank loss.aux.0.weight=0.3` |
-| 2.6 | rank w=0.1, k=128/128 | `loss=focal_rank loss.aux.0.k_pos=128 loss.aux.0.k_neg=128` |
+| 2.1 | minpos w=0.1 | `loss=focal_minpos "${CSTAR[@]}"` |
+| 2.2 | minpos w=0.3 | `loss=focal_minpos "${CSTAR[@]}" loss.aux.0.weight=0.3` |
+| 2.3 | minpos w=0.1, k=64 | `loss=focal_minpos "${CSTAR[@]}" loss.aux.0.k=64` |
+| 2.4 | rank w=0.1 | `loss=focal_rank "${CSTAR[@]}"` |
+| 2.5 | rank w=0.3 | `loss=focal_rank "${CSTAR[@]}" loss.aux.0.weight=0.3` |
+| 2.6 | rank w=0.1, k=128/128 | `loss=focal_rank "${CSTAR[@]}" loss.aux.0.k_pos=128 loss.aux.0.k_neg=128` |
 
 While judging on the metric, also inspect in Aim that `loss_minpos` /
 `loss_rank` decrease over training and that their weighted share of `loss`
@@ -184,8 +212,8 @@ alone).
 
 ## Phase 3 — `pos_weight` interaction
 
-Focal focusing and class reweighting overlap: the `(1-p_t)^γ` factor already
-suppresses the easy-negative flood, so the large `auto` ratio (neg/pos of the
+Focal/asymmetric focusing and class reweighting overlap: the focusing factors
+already suppress easy examples, so the large `auto` ratio (neg/pos of the
 train set) may over-boost positives and cost background rejection. Varies
 `pos_weight` for the Phase-2 winner; 3 runs plus the already-available `auto`
 result.
