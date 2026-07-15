@@ -1,6 +1,6 @@
 # Ablation Study: Loss Functions for Hard-Positive Emphasis
 
-Status: **in progress** (Phase 1: 7/8 runs evaluated)
+Status: **in progress** (Phase 1: 8/8 runs evaluated)
 
 This study evaluates the loss functions provided by the config-driven loss
 framework (`docs/loss.md`, `config/loss/*.yaml`, `muonly.nn.losses`) against
@@ -96,16 +96,14 @@ Results (validation, best checkpoint):
 | 1.2 | 0.137747 | 0.157227 | 0.814449 | `logs/phase1/run-02_focal_gamma-2p0_00` |
 | 1.3 | 0.135111 | 0.221680 | 0.807183 | `logs/phase1/run-03_focal_gamma-3p0_00` |
 | 1.4 | 0.128174 | 0.015442 | 0.786776 | `logs/phase1/run-04_asymmetric-focal_gamma-pos-2p0_gamma-neg-0p0_00` |
-| 1.5 | failed (exit 139) | — | — | `logs/phase1/run-05_asymmetric-focal_gamma-pos-3p0_gamma-neg-0p0_00` |
+| 1.5 | **0.143639** | 0.017944 | 0.782773 | `logs/phase1/run-05_asymmetric-focal_gamma-pos-3p0_gamma-neg-0p0_00` |
 | 1.6 | 0.135073 | 0.080566 | 0.801179 | `logs/phase1/run-06_asymmetric-focal_gamma-pos-2p0_gamma-neg-1p0_00` |
-| 1.7 | **0.142550** | 0.104980 | 0.813670 | `logs/phase1/run-07_asymmetric-focal_gamma-pos-2p0_gamma-neg-1p0_clip-0p05_00` |
+| 1.7 | 0.142550 | 0.104980 | 0.813670 | `logs/phase1/run-07_asymmetric-focal_gamma-pos-2p0_gamma-neg-1p0_clip-0p05_00` |
 
-**Status (2026-07-14):** Seven runs completed. Run 1.5 failed with exit
-code 139 before final evaluation and has no `results/best/sas.json`.
-Among the completed runs, the provisional **C\*** is ASL γ+=2, γ−=1 with
-clip=0.05 (run 1.7). The best focal result (γ=2, run 1.2) exceeds BCE by
-0.029145 absolute TNR at the target operating point, so the focal family
-does beat BCE in this seed. Rerun 1.5 before declaring the Phase-1 winner.
+**Status (2026-07-15):** All eight runs completed. The Phase-1 winner
+**C\*** is ASL γ+=3, γ−=0 (run 1.5), with TNR 0.143639 at the target
+operating point. The best focal result (γ=2, run 1.2) exceeds BCE by
+0.029145 absolute TNR, so the focal family also beats BCE in this seed.
 
 Outcome: pick the best criterion **C\*** (highest `tnr_at_tpr_0p9999`; break
 ties toward the simpler criterion). Also note whether the focal family beats
@@ -148,39 +146,36 @@ stable at 0.409049–0.411936, while the minpos runs have near-zero TNR. Because
 training length, seed, and loss hyperparameters differ, these values should
 not be used to select **C\*** from the controlled Phase-1 table.
 
-### Phase 1 conclusion (provisional)
+### Phase 1 conclusion
 
 At seed `20260710`, hard-example focusing improves the target operating-point
-metric over BCE. The current leader, ASL γ+=2, γ−=1 with clip=0.05, reaches
-TNR 0.142550: an absolute gain of 0.033948 (31.3% relative) over BCE. Focal
-γ=2 also improves on BCE by 0.029145 absolute TNR. The AUROC ordering does
-not match the target-metric ordering, reinforcing that **C\*** must be selected
-using `tnr_at_tpr_0p9999` rather than AUROC.
+metric over BCE. The winner, ASL γ+=3, γ−=0, reaches TNR 0.143639: an
+absolute gain of 0.035037 (32.3% relative) over BCE and a narrow 0.001089
+lead over clipped ASL γ+=2, γ−=1 (run 1.7). Focal γ=2 also improves on BCE
+by 0.029145 absolute TNR. The AUROC ordering does not match the target-metric
+ordering, reinforcing that **C\*** must be selected using
+`tnr_at_tpr_0p9999` rather than AUROC.
 
-This conclusion remains provisional because ASL γ+=3, γ−=0 (run 1.5) has
-no final evaluation. Rerun it before declaring **C\***. Until then, use the
-clipped-ASL leader as the provisional Phase-2 base. The uncontrolled 200-epoch
-runs suggest that training duration and `pos_weight` can materially affect the
-result, but they do not change the controlled Phase-1 selection.
+The uncontrolled 200-epoch runs suggest that training duration and
+`pos_weight` can materially affect the result, but they do not change the
+controlled Phase-1 selection.
 
 ## Phase 2 — Auxiliary batch-level terms
 
-Add tail-targeting aux terms on top of **C\***. Until run 1.5 is rerun, the
-commands use the provisional clipped-ASL leader through this validated Hydra
-override array:
+Add tail-targeting aux terms on top of **C\***. The commands use the selected
+ASL γ+=3, γ−=0 criterion through this validated Hydra override array:
 
 ```bash
 CSTAR=(
   loss.criterion._target_=muonly.nn.AsymmetricFocalLoss
   '~loss.criterion.gamma'
-  +loss.criterion.gamma_pos=2.0
-  +loss.criterion.gamma_neg=1.0
-  +loss.criterion.clip=0.05
+  +loss.criterion.gamma_pos=3.0
+  +loss.criterion.gamma_neg=0.0
+  +loss.criterion.clip=0.0
 )
 ```
 
-If run 1.5 becomes the winner, update `CSTAR` before launching Phase 2. The
-phase varies term type and mixing weight; 6 runs.
+The phase varies term type and mixing weight; 6 runs.
 
 | # | Run | Command (append to `TRAIN`) |
 | --- | --- | --- |
