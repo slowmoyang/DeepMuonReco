@@ -1,6 +1,7 @@
 # Ablation Study: Loss Functions for Hard-Positive Emphasis
 
-Status: **in progress** (Phase 1: 8/8 runs evaluated)
+Status: **in progress** (Phase 1: rerun at 100 epochs, 8/8 runs evaluated,
+winner selected)
 
 This study evaluates the loss functions provided by the config-driven loss
 framework (`docs/loss.md`, `config/loss/*.yaml`, `muonly.nn.losses`) against
@@ -37,7 +38,8 @@ criteria and/or batch-level tail-targeting auxiliary terms — improve
 | Entry point | `uv run python scripts/train.py` (config `no-hit`) | `scripts/train.py` |
 | Model | `latent_cross_attention` | `config/default.yaml` |
 | Data | `mu2030pu`, no RPC/GEM hits | `config/no-hit.yaml` |
-| Optimizer | AdamW-style defaults: lr 3e-4, wd 1e-2, 20 epochs, 5% warmup, cosine annealing, grad clip 1.0 | `config/optim/default.yaml` |
+| Optimizer | AdamW-style defaults: lr 3e-4, wd 1e-2, 5% warmup, cosine annealing, grad clip 1.0 | `config/optim/default.yaml` |
+| Epochs | 100 (`optim.max_epochs=100`; the default 20-epoch schedule was found to change the criterion ranking, see Phase 1) | override |
 | Batch size | 128 | `config/data_load/default.yaml` |
 | Precision | bfloat16 autocast, cuda | `config/torch/default.yaml` |
 | Seed | `torch.seed=20260710` (fixed; varied only in Phase 4) | override |
@@ -46,8 +48,12 @@ criteria and/or batch-level tail-targeting auxiliary terms — improve
 Common command prefix (abbreviated below as `TRAIN`):
 
 ```bash
-TRAIN="uv run python scripts/train.py torch.seed=20260710"
+TRAIN="uv run python scripts/train.py torch.seed=20260710 optim.max_epochs=100"
 ```
+
+The BCE baseline config is `loss=bce` (`config/loss/bce.yaml`); the former
+`loss=default` name no longer exists. Phase-1 runs were launched via
+`submit/phase1.fish` with `exp=phase1` and explicit `run=` directory names.
 
 Each run writes `result/val.json` (final validation with best checkpoint) and
 `sas.json` in its run directory, and tracks `loss`, `loss_base`,
@@ -56,7 +62,8 @@ directory in the results tables below.
 
 ## Phase 0 — Smoke checks (done once per code change)
 
-`mode=sanity-check` (1024 events, 2 epochs) for `loss=default`, `loss=focal`,
+`mode=sanity-check` (1024 events, 2 epochs) for `loss=bce` (formerly
+`loss=default`), `loss=focal`,
 `loss=asymmetric_focal`, `loss=focal_minpos`, `loss=focal_rank`. Pass
 criteria: run completes, `tnr_at_tpr_0p9999` computed, score-distribution
 plot renders, Aim shows all loss components. Unit-level checks (focal(γ=0) ≡
@@ -78,7 +85,7 @@ clipping. 8 runs; with 4 GPUs, two batches of 4 (`torch.device=cuda:N`).
 
 | # | Run | Command (append to `TRAIN`) | Rationale |
 | --- | --- | --- | --- |
-| 1.0 | BCE baseline | `loss=default` | reference |
+| 1.0 | BCE baseline | `loss=bce` | reference |
 | 1.1 | focal γ=1 | `loss=focal loss.criterion.gamma=1.0` | mild focusing |
 | 1.2 | focal γ=2 | `loss=focal` | standard focal |
 | 1.3 | focal γ=3 | `loss=focal loss.criterion.gamma=3.0` | strong focusing |
@@ -87,28 +94,52 @@ clipping. 8 runs; with 4 GPUs, two batches of 4 (`torch.device=cuda:N`).
 | 1.6 | ASL γ+=2, γ−=1 | `loss=asymmetric_focal loss.criterion.gamma_neg=1.0` | asymmetric, mild negative focusing |
 | 1.7 | ASL γ+=2, γ−=1, clip=0.05 | `loss=asymmetric_focal loss.criterion.gamma_neg=1.0 loss.criterion.clip=0.05` | additionally zero easy negatives |
 
-Results (validation, best checkpoint):
+Results at 100 epochs (validation, best checkpoint; `sas.json` entry
+`tpr_requested=0.9999`, AUROC from `val.json`):
 
 | # | `tnr_at_tpr_0p9999` | threshold | AUROC | run dir / Aim hash |
 | --- | --- | --- | --- | --- |
-| 1.0 | 0.108602 | 0.018311 | 0.812964 | `logs/phase1/run-00_bce_00` |
-| 1.1 | 0.099902 | 0.096680 | 0.802574 | `logs/phase1/run-01_focal_gamma-1p0_00` |
-| 1.2 | 0.137747 | 0.157227 | 0.814449 | `logs/phase1/run-02_focal_gamma-2p0_00` |
-| 1.3 | 0.135111 | 0.221680 | 0.807183 | `logs/phase1/run-03_focal_gamma-3p0_00` |
-| 1.4 | 0.128174 | 0.015442 | 0.786776 | `logs/phase1/run-04_asymmetric-focal_gamma-pos-2p0_gamma-neg-0p0_00` |
-| 1.5 | **0.143639** | 0.017944 | 0.782773 | `logs/phase1/run-05_asymmetric-focal_gamma-pos-3p0_gamma-neg-0p0_00` |
-| 1.6 | 0.135073 | 0.080566 | 0.801179 | `logs/phase1/run-06_asymmetric-focal_gamma-pos-2p0_gamma-neg-1p0_00` |
-| 1.7 | 0.142550 | 0.104980 | 0.813670 | `logs/phase1/run-07_asymmetric-focal_gamma-pos-2p0_gamma-neg-1p0_clip-0p05_00` |
+| 1.0 | 0.332205 | 0.001648 | 0.918929 | `logs/phase1/run-00_bce_00` |
+| 1.1 | 0.334011 | 0.030640 | 0.913302 | `logs/phase1/run-01_focal_gamma-1p0_00` |
+| 1.2 | 0.353297 | 0.088867 | 0.917017 | `logs/phase1/run-02_focal_gamma-2p0_00` |
+| 1.3 | **0.370795** | 0.142578 | 0.920179 | `logs/phase1/run-03_focal_gamma-3p0_00` |
+| 1.4 | 0.325054 | 0.001457 | 0.910540 | `logs/phase1/run-04_asymmetric-focal_gamma-pos-2p0_gamma-neg-0p0_00` |
+| 1.5 | 0.217603 | 0.001503 | 0.894176 | `logs/phase1/run-05_asymmetric-focal_gamma-pos-3p0_gamma-neg-0p0_00` |
+| 1.6 | 0.342389 | 0.041992 | 0.909713 | `logs/phase1/run-06_asymmetric-focal_gamma-pos-2p0_gamma-neg-1p0_00` |
+| 1.7 | 0.367474 | 0.048828 | 0.919480 | `logs/phase1/run-07_asymmetric-focal_gamma-pos-2p0_gamma-neg-1p0_clip-0p05_00` |
 
-**Status (2026-07-15):** All eight runs completed. The Phase-1 winner
-**C\*** is ASL γ+=3, γ−=0 (run 1.5), with TNR 0.143639 at the target
-operating point. The best focal result (γ=2, run 1.2) exceeds BCE by
-0.029145 absolute TNR, so the focal family also beats BCE in this seed.
+**Status (2026-07-16):** All eight runs completed at 100 epochs. The
+Phase-1 winner **C\*** is focal γ=3 (run 1.3), with TNR 0.370795 at the
+target operating point. Clipped ASL γ+=2, γ−=1 (run 1.7) is a close second
+at 0.367474 (Δ = 0.003321); the simplicity tie-break also favors focal.
 
 Outcome: pick the best criterion **C\*** (highest `tnr_at_tpr_0p9999`; break
 ties toward the simpler criterion). Also note whether the focal family beats
 BCE at all — if not, the aux terms in Phase 2 should be tested on top of BCE
-instead.
+instead. Both conditions resolve in focal's favor at 100 epochs.
+
+### Superseded 20-epoch results
+
+The matrix was first run at the default 20-epoch schedule. Because these
+results and the uncontrolled 200-epoch `loss-ablation` runs disagreed on the
+leader, the matrix was rerun at 100 epochs (tables above); the rerun
+overwrote the original `logs/phase1/run-*` directories, so the 20-epoch
+numbers below are preserved here only for the record.
+
+| # | `tnr_at_tpr_0p9999` | threshold | AUROC |
+| --- | --- | --- | --- |
+| 1.0 | 0.108602 | 0.018311 | 0.812964 |
+| 1.1 | 0.099902 | 0.096680 | 0.802574 |
+| 1.2 | 0.137747 | 0.157227 | 0.814449 |
+| 1.3 | 0.135111 | 0.221680 | 0.807183 |
+| 1.4 | 0.128174 | 0.015442 | 0.786776 |
+| 1.5 | **0.143639** | 0.017944 | 0.782773 |
+| 1.6 | 0.135073 | 0.080566 | 0.801179 |
+| 1.7 | 0.142550 | 0.104980 | 0.813670 |
+
+At 20 epochs the winner was ASL γ+=3, γ−=0 (run 1.5, TNR 0.143639) — the
+opposite end of the 100-epoch ranking, where the same config is worst. See
+the Phase 1 conclusion.
 
 ### Additional 200-epoch loss-ablation runs
 
@@ -148,31 +179,34 @@ not be used to select **C\*** from the controlled Phase-1 table.
 
 ### Phase 1 conclusion
 
-At seed `20260710`, hard-example focusing improves the target operating-point
-metric over BCE. The winner, ASL γ+=3, γ−=0, reaches TNR 0.143639: an
-absolute gain of 0.035037 (32.3% relative) over BCE and a narrow 0.001089
-lead over clipped ASL γ+=2, γ−=1 (run 1.7). Focal γ=2 also improves on BCE
-by 0.029145 absolute TNR. The AUROC ordering does not match the target-metric
-ordering, reinforcing that **C\*** must be selected using
-`tnr_at_tpr_0p9999` rather than AUROC.
+At seed `20260710` and 100 epochs, symmetric focal focusing improves the
+target operating-point metric over BCE, and focusing strength helps
+monotonically: γ=1 → γ=2 → γ=3 gives 0.334011 → 0.353297 → 0.370795. The
+winner **C\*** is focal γ=3, with an absolute gain of 0.038590 over BCE
+(11.6% relative). Clipped ASL γ+=2, γ−=1 (run 1.7) trails by only
+0.003321, but the tie-break rule (fewer hyperparameters, lower complexity)
+selects focal.
 
-The uncontrolled 200-epoch runs suggest that training duration and
-`pos_weight` can materially affect the result, but they do not change the
-controlled Phase-1 selection.
+The criterion ranking is **not stable in training length**. The 20-epoch
+winner, ASL γ+=3, γ−=0, collapses to the worst result at 100 epochs
+(0.217603, well below BCE) — consistent with the uncontrolled 200-epoch
+runs, where ASL γ+=3 also trailed BCE. Positives-only focusing appears to
+help early in training but hurt once the model converges further, so
+short-schedule ablations of this loss family are unreliable; all remaining
+phases run at 100 epochs.
+
+The AUROC ordering again does not match the target-metric ordering
+(e.g. run 1.6 beats run 1.1 on TNR but not on AUROC), reinforcing that
+**C\*** must be selected using `tnr_at_tpr_0p9999` rather than AUROC.
 
 ## Phase 2 — Auxiliary batch-level terms
 
-Add tail-targeting aux terms on top of **C\***. The commands use the selected
-ASL γ+=3, γ−=0 criterion through this validated Hydra override array:
+Add tail-targeting aux terms on top of **C\***. The `focal_minpos` /
+`focal_rank` configs already use `BinaryFocalLoss` (γ=2 default), so the
+selected focal γ=3 criterion needs a single override:
 
 ```bash
-CSTAR=(
-  loss.criterion._target_=muonly.nn.AsymmetricFocalLoss
-  '~loss.criterion.gamma'
-  +loss.criterion.gamma_pos=3.0
-  +loss.criterion.gamma_neg=0.0
-  +loss.criterion.clip=0.0
-)
+CSTAR=(loss.criterion.gamma=3.0)
 ```
 
 The phase varies term type and mixing weight; 6 runs.
@@ -239,8 +273,8 @@ both):
 ```bash
 $TRAIN <winner overrides> torch.seed=1
 $TRAIN <winner overrides> torch.seed=2
-$TRAIN loss=default torch.seed=1
-$TRAIN loss=default torch.seed=2
+$TRAIN loss=bce torch.seed=1
+$TRAIN loss=bce torch.seed=2
 ```
 
 | Config | seed 20260710 | seed 1 | seed 2 | mean | spread |
@@ -264,7 +298,7 @@ For the declared winner only (metric.md procedure):
 
 ## Bookkeeping
 
-- Total budget: 8 (P1) + 6 (P2) + 3 (P3) + 4 (P4) = 21 full runs at 20
+- Total budget: 8 (P1) + 6 (P2) + 3 (P3) + 4 (P4) = 21 full runs at 100
   epochs each; parallelize 4-wide across GPUs via `torch.device=cuda:{0..3}`.
 - Every run's exact config is stored by Hydra in its run directory; the
   tables above only need the run directory / Aim hash to be reproducible.
