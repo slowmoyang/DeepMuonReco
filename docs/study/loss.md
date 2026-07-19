@@ -1,7 +1,7 @@
 # Ablation Study: Loss Functions for Hard-Positive Emphasis
 
-Status: **in progress** (Phase 1: rerun at 100 epochs, 8/8 runs evaluated,
-winner selected)
+Status: **in progress** (Phase 3 complete: overall winner so far is
+focal γ=3 with `pos_weight=100`, TNR 0.390882; Phase 4 next)
 
 This study evaluates the loss functions provided by the config-driven loss
 framework (`docs/loss.md`, `config/loss/*.yaml`, `muonly.nn.losses`) against
@@ -225,43 +225,142 @@ While judging on the metric, also inspect in Aim that `loss_minpos` /
 is neither negligible (<1%, term inert — raise `weight`) nor dominant
 (>50%, term hijacks training — lower `weight`).
 
-Results:
+Results (validation, best checkpoint; aux share = `weight` ×
+`loss_<aux>` / `loss` at the final training epoch, from Aim):
 
-| # | `tnr_at_tpr_0p9999` | threshold | aux share of total loss (end of training) | run dir / Aim hash |
-| --- | --- | --- | --- | --- |
-| 2.1 | | | | |
-| 2.2 | | | | |
-| 2.3 | | | | |
-| 2.4 | | | | |
-| 2.5 | | | | |
-| 2.6 | | | | |
+| # | `tnr_at_tpr_0p9999` | threshold | AUROC | aux share (end) | run dir / Aim hash |
+| --- | --- | --- | --- | --- | --- |
+| 2.1 | 0.087907 | 0.285156 | 0.813709 | 61.6% | `logs/phase2/run-01_focal-minpos_weight-0p1_00` / `b72b28726d1d4b4fa4037c12` |
+| 2.2 | 0.000000 | 0.589844 | 0.500000 | 71.9% | `logs/phase2/run-02_focal-minpos_weight-0p3_00` / `d5ec9b3287334914965e6bb8` |
+| 2.3 | **0.124055** | 0.333984 | 0.815979 | 61.4% | `logs/phase2/run-03_focal-minpos_weight-0p1_k-64_00` / `ad61100369524e009e00f973` |
+| 2.4 | 0.000000 | 0.498047 | 0.500101 | 44.4% | `logs/phase2/run-04_focal-rank_weight-0p1_00` / `604714bb9ce149e098720440` |
+| 2.5 | 0.000000 | 0.498047 | 0.500015 | 70.6% | `logs/phase2/run-05_focal-rank_weight-0p3_00` / `5c6d95a63b794728a6430023` |
+| 2.6 | 0.000000 | 0.498047 | 0.500018 | 44.4% | `logs/phase2/run-06_focal-rank_weight-0p1_k-128-128_00` / `bb7c3e3d54284c07afec36bb` |
 
-Outcome: best combination **C\* + A\*** (or no aux term if none beats C\*
-alone).
+**Status (2026-07-17):** All six runs completed at 100 epochs (Hydra
+`overrides.yaml` in each run directory confirms the planned configuration:
+`loss.criterion.gamma=3.0` plus the phase's aux overrides, seed `20260710`).
+Every auxiliary configuration degrades the target metric severely.
+
+### Phase 2 conclusion
+
+The auxiliary batch-level terms hinder training rather than help it. The
+best aux run (2.3, minpos w=0.1, k=64) reaches TNR 0.124055 — three times
+worse than **C\*** alone (0.370795, Phase 1 run 1.3). Four of the six runs
+collapse to a degenerate scorer (AUROC ≈ 0.5, TNR = 0): all three rank runs
+and minpos w=0.3. The three rank runs end at identical plateau loss values
+(`loss_base` 0.164183, `loss_rank` 1.313262) — the same collapsed solution
+regardless of weight or k.
+
+The failure mode is the one the inspection criterion above was designed to
+catch: the aux terms hijack training. Their weighted share of the total loss
+at the end of training is 44–72% in every run — beyond the >50% red line
+even at w=0.1 — because `loss_minpos` / `loss_rank` plateau while the focal
+base loss decays, so the aux term's relative weight grows as training
+converges. This is consistent with the uncontrolled 200-epoch
+`loss-ablation` minpos runs, which also ended with near-zero TNR.
+
+Outcome: **C\* + A\* = focal γ=3 with no aux term** (TNR 0.370795). No aux
+configuration beats — or even approaches — **C\*** alone.
 
 ## Phase 3 — `pos_weight` interaction
 
 Focal/asymmetric focusing and class reweighting overlap: the focusing factors
 already suppress easy examples, so the large `auto` ratio (neg/pos of the
 train set) may over-boost positives and cost background rejection. Varies
-`pos_weight` for the Phase-2 winner; 3 runs plus the already-available `auto`
-result.
+`pos_weight` for the Phase-2 winner — which is **C\*** alone (focal γ=3, no
+aux term), so the winner overrides are `loss=focal loss.criterion.gamma=3.0`;
+4 runs plus the already-available `auto` result (run 3.4 was added beyond the
+originally planned 3-run matrix). A second sweep at seed `20260719` repeats
+the four explicit weights. The exploratory `pos_weight=200` extension was
+evaluated separately at seeds `20260711` and `20260719`.
 
 | # | Run | Command (append to `TRAIN` + winner overrides) |
 | --- | --- | --- |
-| 3.0 | auto | (= Phase-2 winner, no new run) |
+| 3.0 | auto | (= Phase-1 run 1.3, no new run) |
 | 3.1 | pos_weight=1 | `loss.pos_weight=1` |
 | 3.2 | pos_weight=10 | `loss.pos_weight=10` |
 | 3.3 | pos_weight=50 | `loss.pos_weight=50` |
+| 3.4 | pos_weight=100 | `loss.pos_weight=100` |
+| 3.5 | pos_weight=200 | `loss.pos_weight=200` |
 
-Results:
+Original results at seed `20260710` (validation, best checkpoint; `sas.json`
+entry `tpr_requested=0.9999`, AUROC from `val.json`):
 
-| # | `tnr_at_tpr_0p9999` | threshold | run dir / Aim hash |
+| # | `tnr_at_tpr_0p9999` | threshold | AUROC | run dir / Aim hash |
+| --- | --- | --- | --- | --- |
+| 3.0 | 0.370795 | 0.142578 | 0.920179 | `logs/phase1/run-03_focal_gamma-3p0_00` (= run 1.3) |
+| 3.1 | 0.340605 | 0.075684 | 0.919496 | `logs/phase3/run-01_pos-weight-1_00` / `fbd73be3dd564f09ad905a7a` |
+| 3.2 | 0.371054 | 0.124023 | 0.921029 | `logs/phase3/run-02_pos-weight-10_00` / `27ca51928a0d4f14b4c5a1b9` |
+| 3.3 | 0.361573 | 0.158203 | 0.917742 | `logs/phase3/run-03_pos-weight-50_00` / `5f5d956b41c94206a77489ba` |
+| 3.4 | **0.390882** | 0.178711 | 0.920833 | `logs/phase3/run-04_pos-weight-100_00` / `83013b82d27b45f9b00832ab` |
+
+The first exploratory `pos_weight=200` run used seed `20260711`:
+
+| # | `tnr_at_tpr_0p9999` | threshold | run dir |
 | --- | --- | --- | --- |
-| 3.0 | | | |
-| 3.1 | | | |
-| 3.2 | | | |
-| 3.3 | | | |
+| 3.5 | **0.401230** | 0.212891 | `logs/phase3/run-04_pos-weight-200_00` |
+
+Replication results at seed `20260719` (same metric and checkpoint
+selection):
+
+| # | `tnr_at_tpr_0p9999` | threshold | run dir |
+| --- | --- | --- | --- |
+| 3.1 | 0.344438 | 0.079102 | `logs/phase3/run-01_pos-weight-1_01` |
+| 3.2 | **0.387238** | 0.121582 | `logs/phase3/run-02_pos-weight-10_01` |
+| 3.3 | 0.369905 | 0.151367 | `logs/phase3/run-03_pos-weight-50_01` |
+| 3.4 | 0.385186 | 0.179688 | `logs/phase3/run-04_pos-weight-100_01` |
+| 3.5 | 0.382388 | 0.194336 | `logs/phase3/run-04_pos-weight-200_01` |
+
+Two-run summaries are shown below. The first `pos_weight=200` run uses seed
+`20260711`, not `20260710`, so its mean is not a paired comparison with the
+other weights.
+
+| `pos_weight` | first result (seed) | seed `20260719` | mean | spread |
+| --- | --- | --- | --- | --- |
+| 1 | 0.340605 (`20260710`) | 0.344438 | 0.342522 | 0.003833 |
+| 10 | 0.371054 (`20260710`) | 0.387238 | 0.379146 | 0.016184 |
+| 50 | 0.361573 (`20260710`) | 0.369905 | 0.365739 | 0.008332 |
+| 100 | 0.390882 (`20260710`) | 0.385186 | 0.388034 | 0.005696 |
+| 200 | 0.401230 (`20260711`) | 0.382388 | **0.391809** | 0.018842 |
+
+**Status (2026-07-19):** The original four runs, both exploratory
+`pos_weight=200` runs, and all seed-`20260719` replicas completed at 100
+epochs. Their configs use `loss=focal loss.criterion.gamma=3.0` plus the
+listed `loss.pos_weight`. The `auto` reference was not repeated at seed
+`20260719`.
+
+### Phase 3 conclusion
+
+Class reweighting still matters on top of focal focusing. Removing it
+entirely (`pos_weight=1`, run 3.1) is the worst explicit configuration at
+both seeds (TNR 0.340605 and 0.344438), so the focusing factor alone does not
+compensate for the class imbalance at the target operating point.
+
+The response is not monotonic in `pos_weight`, and the exact ranking is
+seed-sensitive. At seed `20260710`, 100 is best, followed by 10, 50, and 1;
+at seed `20260719`, 10 narrowly leads 100, followed by 200, 50, and 1. The
+seed-`20260711` `pos_weight=200` run reaches 0.401230, the highest individual
+Phase-3 TNR, but its seed-`20260719` replica falls to 0.382388.
+
+`pos_weight=200` consequently has the highest numerical two-run mean
+(0.391809), but its runs use a different first seed from the paired sweep and
+its spread is the largest (0.018842). `pos_weight=100` has a slightly lower
+mean (0.388034), but the highest worst-run TNR (0.385186) and a much smaller
+spread (0.005696). The +0.003775 mean advantage for 200 is therefore not
+enough to displace 100 without a seed-`20260710` weight-200 run or a broader
+common-seed comparison.
+
+The original-seed gain of `pos_weight=100` over `auto` remains +0.020087
+(5.4% relative), but `auto` was not replicated, so that margin cannot yet be
+called seed-robust. AUROC remains uninformative for the original-seed ranking
+(all runs sit at 0.918–0.921).
+
+Outcome: the conservative winner entering Phase 4 remains **focal γ=3 with
+`pos_weight=100`** (`loss=focal loss.criterion.gamma=3.0
+loss.pos_weight=100`), with two-run mean TNR 0.388034 and worst-run TNR
+0.385186. The higher but less stable `pos_weight=200` result remains a
+candidate for a common-seed follow-up.
 
 ## Phase 4 — Seed robustness and final comparison
 
@@ -271,11 +370,14 @@ baseline with 3 seeds each (the pinned `20260710` run already exists for
 both):
 
 ```bash
-$TRAIN <winner overrides> torch.seed=1
-$TRAIN <winner overrides> torch.seed=2
+$TRAIN loss=focal loss.criterion.gamma=3.0 loss.pos_weight=100 torch.seed=1
+$TRAIN loss=focal loss.criterion.gamma=3.0 loss.pos_weight=100 torch.seed=2
 $TRAIN loss=bce torch.seed=1
 $TRAIN loss=bce torch.seed=2
 ```
+
+(The pinned-seed winner run is Phase-3 run 3.4; the pinned-seed BCE run is
+Phase-1 run 1.0.)
 
 | Config | seed 20260710 | seed 1 | seed 2 | mean | spread |
 | --- | --- | --- | --- | --- | --- |
@@ -298,7 +400,7 @@ For the declared winner only (metric.md procedure):
 
 ## Bookkeeping
 
-- Total budget: 8 (P1) + 6 (P2) + 3 (P3) + 4 (P4) = 21 full runs at 100
+- Total budget: 8 (P1) + 6 (P2) + 4 (P3) + 4 (P4) = 22 full runs at 100
   epochs each; parallelize 4-wide across GPUs via `torch.device=cuda:{0..3}`.
 - Every run's exact config is stored by Hydra in its run directory; the
   tables above only need the run directory / Aim hash to be reproducible.
