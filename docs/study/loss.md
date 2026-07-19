@@ -8,6 +8,16 @@ framework (`docs/loss.md`, `config/loss/*.yaml`, `muonly.nn.losses`) against
 the BCE baseline. It executes the verification of `docs/plan.md` Priority 1
 ("Align the loss with the operating point").
 
+## Phase goals
+
+| Phase | Goal |
+| --- | --- |
+| 0 — Smoke checks | Verify that every loss configuration runs end to end and that its metrics, plots, and loss components are recorded correctly. |
+| 1 — Criterion ablation | Isolate the effect of the base criterion and focusing strength, then select the best criterion **C\*** at the target operating point. |
+| 2 — Auxiliary terms | Test whether batch-level hard-positive terms improve **C\***, then select the best auxiliary setup **A\*** (including no auxiliary term). |
+| 3 — `pos_weight` interaction | Tune class reweighting on top of **C\* + A\*** and select the overall candidate configuration. |
+| 4 — Seed robustness | Measure seed sensitivity and determine whether the candidate improves robustly over BCE before final test-set evaluation. |
+
 ## Question
 
 Does concentrating gradient on hard positives — via focal / asymmetric-focal
