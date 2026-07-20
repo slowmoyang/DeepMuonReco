@@ -456,3 +456,197 @@ robust-improvement criterion show that stochastic training variation is
 large relative to the improvement; they do not negate the consistent paired
 advantage. The untouched test set will be evaluated only for the final
 performance report, not for model selection or hyperparameter optimization.
+
+## Reference resolved configuration
+
+The resolved Hydra configuration below is preserved from the representative
+Phase-4 focal run at seed 1. It records the complete selected training setup
+for reproducing the study and configuring future comparisons. Absolute paths,
+device assignment, seed, experiment name, and run name are specific to this
+run and should be changed as appropriate when reusing the configuration.
+
+```yaml
+model:
+  _target_: muonly.nn.LatentCrossAttentionModel
+  tracker_track_dim: 7
+  dt_segment_dim: 6
+  csc_segment_dim: 6
+  gem_segment_dim: 6
+  rpc_hit_dim: null
+  gem_hit_dim: null
+  output_dim: 1
+  model_dim: 128
+  num_heads: 8
+  muon_det_latent_len: 64
+  muon_det_num_processors: 1
+  muon_det_processor_block_weight_sharing: false
+  decoder_num_layers: 1
+  widening_factor: 4
+  dropout: 0
+data:
+  tracker_track:
+    features:
+    - px
+    - py
+    - pz
+    - vx
+    - vy
+    - vz
+    - charge
+    dim: 7
+    preprocessing:
+    - _target_: muonly.data.transforms.SignedLog1p
+      index:
+      - 0
+      - 1
+      - 2
+      - 3
+      - 4
+      - 5
+    - _target_: muonly.data.transforms.MinMaxScaling
+      input_min:
+      - -14.243
+      - -14.302
+      - -15.286
+      - -4.678
+      - -4.946
+      - -6.193
+      - -1
+      input_max:
+      - 13.967
+      - 12.497
+      - 14.909
+      - 5.152
+      - 3.461
+      - 5.638
+      - 1
+    is_good: true
+    target: track_is_trk_muon
+  dt_segment:
+    features:
+    - pos_x
+    - pos_y
+    - pos_z
+    - dir_x
+    - dir_y
+    - dir_z
+    dim: 6
+    preprocessing:
+    - _target_: muonly.data.transforms.MinMaxScaling
+      input_min:
+      - -787.279
+      - -720.46
+      - -652.168
+      - -1
+      - -1
+      - -1
+      input_max:
+      - 779.118
+      - 720.495
+      - 652.156
+      - 1
+      - 1
+      - 1
+  csc_segment:
+    features:
+    - pos_x
+    - pos_y
+    - pos_z
+    - dir_x
+    - dir_y
+    - dir_z
+    dim: 6
+    preprocessing:
+    - _target_: muonly.data.transforms.MinMaxScaling
+      input_min:
+      - -687.41
+      - -686.932
+      - -1037.543
+      - -1
+      - -1
+      - -1
+      input_max:
+      - 685.69
+      - 685.244
+      - 1037.743
+      - 1
+      - 1
+      - 1
+  gem_segment:
+    features:
+    - pos_x
+    - pos_y
+    - pos_z
+    - dir_x
+    - dir_y
+    - dir_z
+    dim: 6
+    preprocessing:
+    - _target_: muonly.data.transforms.MinMaxScaling
+      input_min:
+      - -142.873
+      - -144.459
+      - -538.79
+      - -1
+      - -1
+      - -1
+      input_max:
+      - 142.96
+      - 144.926
+      - 538.79
+      - 1
+      - 1
+      - 1
+  rpc_hit: null
+  gem_hit: null
+data_load:
+  train_max_events: null
+  val_max_events: null
+  test_max_events: null
+  batch_size: 128
+  eval_batch_size: 128
+  num_workers: 0
+  pin_memory: false
+optim:
+  max_epochs: 100
+  lr: 0.0003
+  weight_decay: 0.01
+  beta1: 0.9
+  beta2: 0.999
+  warmup:
+    frac_steps: 0.05
+    start_factor: 0.1
+  annealing:
+    eta_min_factor: 0.01
+  max_grad_norm: 1
+loss:
+  pos_weight: 100
+  criterion:
+    _target_: muonly.nn.BinaryFocalLoss
+    gamma: 3.0
+    reduction: none
+paths:
+  root_dir: /users/hep/slowmoyang/work/muonly/dev-loss
+  log_dir: /users/hep/slowmoyang/work/muonly/dev-loss/logs/
+  run_dir: /users/hep/slowmoyang/work/muonly/dev-loss/logs//phase4/run-01_focal_gamma-3p0_pos-weight-100_seed-1_00
+  work_dir: /users/hep/slowmoyang/work/muonly/dev-loss
+  data_dir: /users/hep/joshin/store/muonly/dataset/
+  train_file: /users/hep/joshin/store/muonly/dataset//train.h5
+  val_file: /users/hep/joshin/store/muonly/dataset//val.h5
+  test_file: /users/hep/joshin/store/muonly/dataset//test.h5
+torch:
+  num_threads: 16
+  num_interop_threads: 1
+  float32_matmul_precision: high
+  device: cuda:0
+  precision: bfloat16
+  sdpa_backend: math
+  seed: 1
+  compile: false
+  detect_anomaly: false
+  check_nan: true
+misc:
+  tqdm: false
+exp: phase4
+run: run-01_focal_gamma-3p0_pos-weight-100_seed-1_00
+```
