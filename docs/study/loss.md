@@ -1,7 +1,8 @@
 # Ablation Study: Loss Functions for Hard-Positive Emphasis
 
-Status: **in progress** (Phase 3 complete: overall winner so far is
-focal γ=3 with `pos_weight=100`, TNR 0.390882; Phase 4 next)
+Status: **in progress** (Phase 4 complete: focal γ=3 with
+`pos_weight=100` beats BCE at all six matched seeds, but does not meet the
+predeclared robust-improvement criterion; final test-set evaluation pending)
 
 This study evaluates the loss functions provided by the config-driven loss
 framework (`docs/loss.md`, `config/loss/*.yaml`, `muonly.nn.losses`) against
@@ -375,27 +376,43 @@ candidate for a common-seed follow-up.
 ## Phase 4 — Seed robustness and final comparison
 
 The 99.9%-TPR threshold is set by a handful of validation tracks, so
-single-run margins can be statistical. Rerun the overall winner and the BCE
-baseline with 3 seeds each (the pinned `20260710` run already exists for
-both):
+single-run margins can be statistical. The overall winner and BCE baseline
+were compared on six common seeds: the existing pinned `20260710` runs plus
+five new runs per config at seeds 1–5, launched via `submit/phase4.fish`.
+The pinned-seed winner is Phase-3 run 3.4; the pinned-seed BCE reference is
+Phase-1 run 1.0.
 
-```bash
-$TRAIN loss=focal loss.criterion.gamma=3.0 loss.pos_weight=100 torch.seed=1
-$TRAIN loss=focal loss.criterion.gamma=3.0 loss.pos_weight=100 torch.seed=2
-$TRAIN loss=bce torch.seed=1
-$TRAIN loss=bce torch.seed=2
-```
+Results (validation, best checkpoint; `sas.json` entry
+`tpr_requested=0.9999`):
 
-(The pinned-seed winner run is Phase-3 run 3.4; the pinned-seed BCE run is
-Phase-1 run 1.0.)
-
-| Config | seed 20260710 | seed 1 | seed 2 | mean | spread |
+| seed | focal γ=3, `pos_weight=100` | threshold | BCE | threshold | paired TNR gain |
 | --- | --- | --- | --- | --- | --- |
-| BCE baseline | | | | | |
-| winner | | | | | |
+| `20260710` | 0.390882 | 0.178711 | 0.332205 | 0.001648 | +0.058677 |
+| `1` | 0.358400 | 0.168945 | 0.335412 | 0.001282 | +0.022988 |
+| `2` | 0.378467 | 0.174805 | 0.362551 | 0.001411 | +0.015916 |
+| `3` | 0.378134 | 0.175781 | 0.350283 | 0.001648 | +0.027851 |
+| `4` | 0.386156 | 0.177734 | 0.372250 | 0.001411 | +0.013906 |
+| `5` | 0.390527 | 0.172852 | 0.353528 | 0.001755 | +0.036999 |
 
-Declare improvement only if the winner's worst seed beats the baseline's best
-seed, or at minimum if the mean gap clearly exceeds the seed spread.
+| Config | mean | minimum | maximum | spread |
+| --- | --- | --- | --- | --- |
+| BCE baseline | 0.351038 | 0.332205 | 0.372250 | 0.040045 |
+| focal γ=3, `pos_weight=100` | **0.380428** | **0.358400** | **0.390882** | 0.032482 |
+
+**Status (2026-07-20):** All ten new runs completed at 100 epochs. Focal
+beats BCE at every matched seed, with paired absolute gains from 0.013906 to
+0.058677. Its mean gain is 0.029389 (8.4% relative).
+
+### Phase 4 conclusion
+
+The paired comparison consistently favors focal γ=3 with
+`pos_weight=100`: it beats BCE at all six common seeds. However, the
+predeclared robust-improvement criterion is not met. Focal's worst result
+(0.358400) does not beat BCE's best (0.372250), and the mean gap (0.029389)
+does not exceed either config's full seed spread (0.032482 for focal,
+0.040045 for BCE). The study therefore does not formally declare a
+seed-robust improvement. Final test-set evaluation remains pending a winner
+declaration.
 
 ## Final test-set evaluation
 
@@ -410,8 +427,9 @@ For the declared winner only (metric.md procedure):
 
 ## Bookkeeping
 
-- Total budget: 8 (P1) + 6 (P2) + 4 (P3) + 4 (P4) = 22 full runs at 100
-  epochs each; parallelize 4-wide across GPUs via `torch.device=cuda:{0..3}`.
+- Actual completed budget: 8 (P1) + 6 (P2) + 10 (P3) + 10 (P4) = 34 full
+  runs at 100 epochs each. Phase 4 reuses the pinned-seed focal and BCE runs
+  from earlier phases in its six-seed comparison.
 - Every run's exact config is stored by Hydra in its run directory; the
   tables above only need the run directory / Aim hash to be reproducible.
 - If two configs tie within seed spread, prefer (in order): fewer
@@ -419,4 +437,9 @@ For the declared winner only (metric.md procedure):
 
 ## Conclusions
 
-_To be filled in after Phase 4 and the test-set evaluation._
+Focal γ=3 with `pos_weight=100` is the strongest configuration from the
+controlled ablation. It beats BCE at all six matched Phase-4 seeds and raises
+mean validation TNR at TPR ≥ 99.9% from 0.351038 to 0.380428 (+0.029389,
+8.4% relative). The seed ranges overlap, however, and the gain does not meet
+the predeclared robustness rule, so no seed-robust winner is formally
+declared. Test-set evaluation remains pending.
