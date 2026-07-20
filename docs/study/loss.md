@@ -4,6 +4,12 @@ Status: **model selection complete** (focal γ=3 with `pos_weight=100`
 beats BCE at all six matched seeds and is selected for the final model;
 test-set performance evaluation pending)
 
+> **Configuration note:** The commands and preset defaults described in this
+> study are historical and may differ from the repository's current defaults.
+> Each ablation run's exact resolved configuration is archived by Hydra in its
+> run directory; the complete resolved configuration of the selected final
+> setup is also archived at the bottom of this document.
+
 This study evaluates the loss functions provided by the config-driven loss
 framework (`docs/loss.md`, `config/loss/*.yaml`, `muonly.nn.losses`) against
 the BCE baseline. It executes the verification of `docs/plan.md` Priority 1
