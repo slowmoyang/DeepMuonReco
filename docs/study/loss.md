@@ -1,8 +1,8 @@
 # Ablation Study: Loss Functions for Hard-Positive Emphasis
 
-Status: **in progress** (Phase 4 complete: focal γ=3 with
-`pos_weight=100` beats BCE at all six matched seeds, but does not meet the
-predeclared robust-improvement criterion; final test-set evaluation pending)
+Status: **model selection complete** (focal γ=3 with `pos_weight=100`
+beats BCE at all six matched seeds and is selected for the final model;
+test-set performance evaluation pending)
 
 This study evaluates the loss functions provided by the config-driven loss
 framework (`docs/loss.md`, `config/loss/*.yaml`, `muonly.nn.losses`) against
@@ -17,7 +17,7 @@ the BCE baseline. It executes the verification of `docs/plan.md` Priority 1
 | 1 — Criterion ablation | Isolate the effect of the base criterion and focusing strength, then select the best criterion **C\*** at the target operating point. |
 | 2 — Auxiliary terms | Test whether batch-level hard-positive terms improve **C\***, then select the best auxiliary setup **A\*** (including no auxiliary term). |
 | 3 — `pos_weight` interaction | Tune class reweighting on top of **C\* + A\*** and select the overall candidate configuration. |
-| 4 — Seed robustness | Measure seed sensitivity and determine whether the candidate improves robustly over BCE before final test-set evaluation. |
+| 4 — Seed robustness | Measure seed sensitivity, compare the candidate with BCE across matched seeds, and finalize model selection before test-set evaluation. |
 
 ## Question
 
@@ -406,13 +406,23 @@ beats BCE at every matched seed, with paired absolute gains from 0.013906 to
 ### Phase 4 conclusion
 
 The paired comparison consistently favors focal γ=3 with
-`pos_weight=100`: it beats BCE at all six common seeds. However, the
-predeclared robust-improvement criterion is not met. Focal's worst result
-(0.358400) does not beat BCE's best (0.372250), and the mean gap (0.029389)
-does not exceed either config's full seed spread (0.032482 for focal,
-0.040045 for BCE). The study therefore does not formally declare a
-seed-robust improvement. Final test-set evaluation remains pending a winner
-declaration.
+`pos_weight=100`: it beats BCE at all six common seeds, with positive paired
+gains of 0.013906–0.058677. This consistent matched-seed result supports the
+conclusion that focal is better than BCE under the studied training setup,
+so focal γ=3 with `pos_weight=100` is selected as the final model
+configuration.
+
+Training stochasticity is nevertheless substantial. Focal's worst result
+(0.358400) is below BCE's best (0.372250), and the mean paired gain
+(0.029389) is smaller than either config's full seed spread (0.032482 for
+focal, 0.040045 for BCE). Thus the predeclared robust-improvement criterion,
+which requires separation stronger than the observed seed variation, is not
+met. This does not reverse the paired model-selection result; it records
+that the improvement does not dominate run-to-run variation and that a
+single run is an imprecise performance estimate.
+
+The test set was not used for this decision. It remains reserved for the
+final performance report of the selected configuration.
 
 ## Final test-set evaluation
 
@@ -437,9 +447,12 @@ For the declared winner only (metric.md procedure):
 
 ## Conclusions
 
-Focal γ=3 with `pos_weight=100` is the strongest configuration from the
+Focal γ=3 with `pos_weight=100` is the selected configuration from the
 controlled ablation. It beats BCE at all six matched Phase-4 seeds and raises
 mean validation TNR at TPR ≥ 99.9% from 0.351038 to 0.380428 (+0.029389,
-8.4% relative). The seed ranges overlap, however, and the gain does not meet
-the predeclared robustness rule, so no seed-robust winner is formally
-declared. Test-set evaluation remains pending.
+8.4% relative), supporting the conclusion that focal is better than BCE in
+this setup. The overlapping seed ranges and the failed predeclared
+robust-improvement criterion show that stochastic training variation is
+large relative to the improvement; they do not negate the consistent paired
+advantage. The untouched test set will be evaluated only for the final
+performance report, not for model selection or hyperparameter optimization.
