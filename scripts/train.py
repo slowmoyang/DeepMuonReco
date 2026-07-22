@@ -437,6 +437,8 @@ def evaluate(
     h_num.fill(pt[sig_mask & pass_mask])
 
     eff = Efficiency.from_hist(h_num=h_num, h_den=h_den)
+    eff_file_path = output_dir / "eff_pt"
+    eff.to_npz(path=eff_file_path.with_suffix(".npz"))
 
     fig, ax = plt.subplots()
     eff.plot(ax=ax, ls=":", marker="s", label="New Model")
@@ -447,7 +449,7 @@ def evaluate(
     ax.set_ylabel(r"Signal Tracker Track Efficiency, $\epsilon_{sig}$")
     ax.legend(title=r"$\epsilon_{sig}$=99.99%, Validation Set")
     fig.tight_layout()
-    save_figure(fig=fig, path=output_dir / "eff_pt")
+    save_figure(fig=fig, path=eff_file_path)
     result["eff_pt"] = Image(fig)
 
     # ---------------------------------------------------------------------------
@@ -459,6 +461,8 @@ def evaluate(
     h_num.fill(pt[bkg_mask & ~pass_mask])
 
     rej = Efficiency.from_hist(h_num=h_num, h_den=h_den)
+    rej_file_path = output_dir / "rej_bkg_pt"
+    rej.to_npz(path=rej_file_path.with_suffix(".npz"))
 
     fig, ax = plt.subplots()
     rej.plot(ax=ax, ls=":", marker="s", label="New Model")
@@ -469,7 +473,7 @@ def evaluate(
     ax.set_ylabel(r"Background Tracker Track Rejection Rate, $1 - \epsilon_{bkg}$")
     ax.legend(title=r"$\epsilon_{sig}$=99.99%, Validation Set")
     fig.tight_layout()
-    save_figure(fig=fig, path=output_dir / "rej_bkg_pt")
+    save_figure(fig=fig, path=rej_file_path)
     result["rej_bkg_pt"] = Image(fig)
 
     return result

@@ -73,3 +73,24 @@ class Efficiency:
             **kwargs,
         )
         return fig
+
+    def to_npz(self, path: Path) -> None:
+        np.savez(
+            path,
+            x=self.x,
+            y=self.y,
+            xerr=self.xerr,
+            yerr_low=self.yerr_low,
+            yerr_up=self.yerr_up,
+        )
+
+    @classmethod
+    def from_npz(cls, path: Path) -> "Efficiency":
+        data = np.load(path)
+        return cls(
+            x=data["x"],
+            y=data["y"],
+            xerr=data["xerr"],
+            yerr_low=data["yerr_low"],
+            yerr_up=data["yerr_up"],
+        )
