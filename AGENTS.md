@@ -11,4 +11,5 @@ Read the following documentation files for detailed information about the projec
 - `docs/metric.md` defines the primary evaluation metric (TNR at TPR >= 99.9%), its `BinarySpecificityAtSensitivity` computation, and the evaluation procedure.
 - `docs/loss.md` describes the config-driven loss framework (`config/loss/*.yaml`, `muonly.nn.losses`): focal / asymmetric-focal criteria and batch-level auxiliary terms for hard-positive emphasis.
 - `docs/study/loss.md` defines the loss-function ablation study: phased run matrix (criterion → aux terms → pos_weight → seeds), commands, and result tables.
+- `docs/study/high-pt.md` diagnoses the collapse of background rejection at high pT (pT-prior shortcut vs. learnability ceiling) and defines the specialist / pT-balancing runs that follow.
 - `docs/onnx.md` describes ONNX export (`scripts/export.py`, `Phase2NoHitModelWrapper`) with preprocessing baked into the graph.

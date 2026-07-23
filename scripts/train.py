@@ -2,6 +2,7 @@ import logging
 from pathlib import Path
 from dataclasses import asdict, dataclass
 import warnings
+import math
 import os
 from typing import Any
 from contextlib import nullcontext
@@ -45,7 +46,11 @@ from hist import Hist
 import matplotlib.pyplot as plt
 import mplhep as mh
 
+import numpy as np
+
 from muonly.data.datasets import TrackerTrackSelectionDataset
+from muonly.metrics import compute_pt_binned_operating_point
+from muonly.nn import PtBinWeighting
 from muonly.data.utils import configure_model_in_keys
 from muonly.data.transforms.utils import configure_preprocessing
 from muonly.utils.optim import configure_optimizer
@@ -60,6 +65,7 @@ from muonly.utils.plot import Efficiency, save_figure
 from muonly.utils.sdpa import sdpa_kernel_context
 from muonly.nn.metrics import (
     binary_specificity_at_sensitivity_metric,
+    pt_binned_operating_point_metric,
     validate_binary_metric_inputs,
 )
 
@@ -127,19 +133,53 @@ class GlobalState:
 # ===============================================================================
 
 
-def compute_loss(batch, criterion, aux_terms: nn.ModuleList) -> dict[str, Tensor]:
+def compute_loss(
+    batch,
+    criterion,
+    aux_terms: nn.ModuleList,
+    pt_weighting: nn.Module | None = None,
+    pt_range: tuple[float, float] | None = None,
+) -> dict[str, Tensor]:
     """Compute the total training loss and its components.
 
     The base criterion is averaged over all valid tracks. Each auxiliary term
     is evaluated on the same masked logits/target and added to the total with
     its own ``weight``. Returns a dict with ``loss`` (total, for backward),
     ``loss_base``, and one ``loss_<name>`` entry per auxiliary term.
+
+    ``pt_range`` restricts the *loss support* to tracks in ``[low, high)``.
+    Model inputs are untouched: every track still enters the network and the
+    event context is identical, only the tracks the loss is computed on change.
+    ``pt_weighting`` reweights the per-track criterion by pT bin
+    (``muonly.nn.PtBinWeighting``). Both default to off, which reproduces the
+    plain masked mean.
     """
     mask = batch["tracker_track_data_mask"]
     logits = batch["logits"][mask]
     target = batch["target"][mask].float()
 
-    base_loss = criterion(input=logits, target=target).mean()
+    if pt_range is not None or pt_weighting is not None:
+        pt = batch["tracker_track_pt"][mask].float()
+    else:
+        pt = None
+
+    if pt_range is not None:
+        assert pt is not None
+        support = (pt >= pt_range[0]) & (pt < pt_range[1])
+        logits = logits[support]
+        target = target[support]
+        pt = pt[support]
+        if logits.numel() == 0:
+            zero = logits.new_zeros((), dtype=torch.float32)
+            return {"loss_base": zero, "loss": zero} | {
+                f"loss_{term.name}": zero for term in aux_terms
+            }
+
+    per_track_loss = criterion(input=logits, target=target)
+    if pt_weighting is not None:
+        assert pt is not None
+        per_track_loss = pt_weighting(target=target, pt=pt) * per_track_loss
+    base_loss = per_track_loss.mean()
 
     components = {"loss_base": base_loss}
     total = base_loss
@@ -160,6 +200,8 @@ def train(
     model,
     criterion: nn.Module,
     aux_terms: nn.ModuleList,
+    pt_weighting: nn.Module | None,
+    pt_range: tuple[float, float] | None,
     data_loader: DataLoader,
     optimizer: AdamW,
     lr_scheduler: SequentialLR,
@@ -184,7 +226,11 @@ def train(
         with amp_context:
             batch = model(batch)
             loss_dict = compute_loss(
-                batch=batch, criterion=criterion, aux_terms=aux_terms
+                batch=batch,
+                criterion=criterion,
+                aux_terms=aux_terms,
+                pt_weighting=pt_weighting,
+                pt_range=pt_range,
             )
             loss = loss_dict["loss"]
 
@@ -245,6 +291,13 @@ def validate(
     # sensitivity = true positive rate = signal efficiency
     sas_metric = binary_specificity_at_sensitivity_metric(min_sensitivity=0.9999)
 
+    # per-pT-bin rejection at the *global* operating point: the headline metric
+    # above is dominated by the low-pT bins, which hold >99.9% of the negatives
+    pt_op_metric = pt_binned_operating_point_metric(
+        min_sensitivity=config.eval.min_sensitivity,
+        pt_edges=list(config.eval.pt_edges),
+    )
+
     # ---------------------------------------------------------------------------
     #
     # ---------------------------------------------------------------------------
@@ -282,6 +335,7 @@ def validate(
 
         validate_binary_metric_inputs(preds=preds, target=target)
         sas_metric.update(preds=preds, target=target)
+        pt_op_metric.update(preds=preds, target=target, pt=pt)
 
         # numpy
         sig_mask = target == 1
@@ -297,6 +351,21 @@ def validate(
         name: metric.compute().item() for name, metric in metric_dict.items()
     }
     result["tnr_at_tpr_0p9999"] = sas_metric.compute()[0].item()
+
+    # differential operating point: one global threshold, per-pT-bin rates
+    pt_op_result = pt_op_metric.compute()
+    result["tnr_macro_pt"] = pt_op_result["tnr_macro_pt"].item()
+    result["threshold_pt_op"] = pt_op_result["threshold"].item()
+    for label, tnr, tpr in zip(
+        pt_op_metric.pt_bin_labels,
+        pt_op_result["tnr_pt"].tolist(),
+        pt_op_result["tpr_pt"].tolist(),
+    ):
+        # empty bins are NaN; skip them rather than poison Aim and the JSON dump
+        if math.isfinite(tnr):
+            result[f"tnr_pt_{label}"] = tnr
+        if math.isfinite(tpr):
+            result[f"tpr_pt_{label}"] = tpr
 
     # NOTE:
     fig, ax = plt.subplots()
@@ -476,6 +545,53 @@ def evaluate(
     save_figure(fig=fig, path=rej_file_path)
     result["rej_bkg_pt"] = Image(fig)
 
+    # ---------------------------------------------------------------------------
+    # differential operating point over the analysis pT binning
+    # ---------------------------------------------------------------------------
+    edges = [float(each) for each in config.eval.pt_edges]
+
+    diagnostic = compute_pt_binned_operating_point(
+        y_true=sig_mask,
+        y_score=y_score.numpy(),
+        pt=pt,
+        edges=edges,
+        global_threshold=tpr_to_threshold[0.9999],
+        global_min_tpr=0.9999,
+    )
+    with open(output_dir / "pt_diagnostic.json", "w") as file:
+        json.dump(diagnostic, file, indent=4)
+
+    result["tnr_macro_pt"] = diagnostic["global"]["tnr_macro_pt"]
+
+    # coarse-binned curves over the same edges. The last edge is infinite, so
+    # plot the overflow bin with the width of the previous one.
+    finite_edges = np.asarray(edges[:-1], dtype=np.float64)
+    last_width = finite_edges[-1] - finite_edges[-2]
+    plot_edges = np.append(finite_edges, finite_edges[-1] + last_width)
+    centers = 0.5 * (plot_edges[1:] + plot_edges[:-1])
+    half_widths = 0.5 * (plot_edges[1:] - plot_edges[:-1])
+
+    n_signal = np.asarray(diagnostic["per_bin"]["n_signal"], dtype=np.float64)
+    n_background = np.asarray(diagnostic["per_bin"]["n_background"], dtype=np.float64)
+    efficiency_global = np.asarray(
+        diagnostic["per_bin"]["efficiency_global"], dtype=np.float64
+    )
+    rejection_global = np.asarray(
+        diagnostic["per_bin"]["rejection_global"], dtype=np.float64
+    )
+
+    for name, num, den in [
+        ("eff_pt_coarse", efficiency_global * n_signal, n_signal),
+        ("rej_bkg_pt_coarse", rejection_global * n_background, n_background),
+    ]:
+        curve = Efficiency.from_array(
+            num=np.nan_to_num(num),
+            den=np.where(den > 0, den, 1.0),
+            x=centers,
+            xerr=half_widths,
+        )
+        curve.to_npz(path=(output_dir / name).with_suffix(".npz"))
+
     return result
 
 
@@ -484,32 +600,75 @@ def evaluate(
 # ===============================================================================
 
 
-def compute_pos_weight(dataset: TrackerTrackSelectionDataset) -> Tensor:
-    pos_count = 0
-    neg_count = 0
+def compute_class_pt_counts(
+    dataset: TrackerTrackSelectionDataset,
+    pt_edges: list[float],
+    cache_path: Path | None = None,
+) -> tuple[Tensor, Tensor]:
+    """Count train-set tracks per class and pT bin.
 
-    for example in tqdm.rich.tqdm(dataset, desc="Computing pos_weight"):
-        target = example["target"]
+    One pass serves both ``pos_weight`` (from the class totals) and the
+    pT-balanced loss weighting (from the per-bin counts). The result is cached
+    to ``cache_path`` so a sweep does not recount for every run.
 
-        pos = target.long().sum().item()
-        total = target.numel()
-        neg = total - pos
+    Returns ``(count_negative, count_positive)``, each of shape
+    ``(len(pt_edges) - 1,)``.
+    """
+    if cache_path is not None and cache_path.exists():
+        with cache_path.open() as stream:
+            cached = json.load(stream)
+        if cached["pt_edges"] == pt_edges and cached["n_events"] == len(dataset):
+            _logger.info(f"Loaded class/pT counts from {cache_path}")
+            return (
+                torch.tensor(cached["count_negative"], dtype=torch.float64),
+                torch.tensor(cached["count_positive"], dtype=torch.float64),
+            )
+        _logger.warning(
+            f"Ignoring stale class/pT count cache at {cache_path} "
+            f"(binning or event count changed)."
+        )
 
-        pos_count += pos
-        neg_count += neg
+    boundaries = torch.tensor(pt_edges[1:-1], dtype=torch.float32)
+    num_bins = len(pt_edges) - 1
+    counts = torch.zeros((2, num_bins), dtype=torch.float64)
 
-    if pos_count == 0:
+    for example in tqdm.rich.tqdm(dataset, desc="Counting tracks per class and pT"):
+        target = example["target"].long()
+        indices = torch.bucketize(
+            example["tracker_track_pt"].float(), boundaries, right=True
+        )
+        flat = torch.bincount(
+            target * num_bins + indices, minlength=2 * num_bins
+        ).reshape(2, num_bins)
+        counts += flat
+
+    count_negative, count_positive = counts[0], counts[1]
+
+    if count_positive.sum() == 0:
         raise ValueError(
             "No positive examples found in the dataset. Cannot compute pos_weight."
         )
-    if neg_count == 0:
+    if count_negative.sum() == 0:
         raise ValueError(
             "No negative examples found in the dataset. Cannot compute pos_weight."
         )
 
-    pos_weight = neg_count / pos_count
+    if cache_path is not None:
+        cache_path.parent.mkdir(parents=True, exist_ok=True)
+        with cache_path.open("w") as stream:
+            json.dump(
+                {
+                    "pt_edges": pt_edges,
+                    "n_events": len(dataset),
+                    "count_negative": count_negative.tolist(),
+                    "count_positive": count_positive.tolist(),
+                },
+                stream,
+                indent=4,
+            )
+        _logger.info(f"Wrote class/pT counts to {cache_path}")
 
-    return torch.tensor(pos_weight)
+    return count_negative, count_positive
 
 
 def run(
@@ -698,10 +857,27 @@ def run(
     # ---------------------------------------------------------------------------
     # criterion
     # ---------------------------------------------------------------------------
+    pt_edges = [float(each) for each in config.eval.pt_edges]
+    pt_weight_config = config.loss.get("pt_weight")
+
+    needs_counts = (config.loss.pos_weight == "auto") or (pt_weight_config is not None)
+    if needs_counts:
+        cache_path = pt_weight_config.get("counts_file") if pt_weight_config else None
+        count_negative, count_positive = compute_class_pt_counts(
+            dataset=train_set,
+            pt_edges=pt_edges,
+            cache_path=Path(cache_path) if cache_path else None,
+        )
+    else:
+        count_negative = count_positive = None
+
     if config.loss.pos_weight == "auto":
-        pos_weight = compute_pos_weight(train_set)
+        assert count_negative is not None and count_positive is not None
+        pos_weight = torch.tensor(
+            (count_negative.sum() / count_positive.sum()).item()
+        )
     elif isinstance(config.loss.pos_weight, (int, float)):
-        pos_weight = torch.tensor(config.loss.pos_weight)
+        pos_weight = torch.tensor(float(config.loss.pos_weight))
     else:
         raise ValueError(f"Unsupported pos_weight value: {config.loss.pos_weight}")
 
@@ -713,8 +889,40 @@ def run(
         instantiate(aux_config) for aux_config in (config.loss.get("aux") or [])
     )
 
+    # pT-balanced loss weighting: counters the sample's rising P(signal | pT)
+    if pt_weight_config is None:
+        pt_weighting = None
+    else:
+        assert count_negative is not None and count_positive is not None
+        pt_weighting = PtBinWeighting(
+            pt_edges=pt_edges,
+            count_positive=count_positive,
+            count_negative=count_negative,
+            alpha=pt_weight_config.alpha,
+            max_ratio=pt_weight_config.max_ratio,
+        )
+
+    # loss support restriction (high-pT specialist runs); inputs are unchanged
+    pt_range_config = config.loss.get("pt_range")
+    pt_range = (
+        None
+        if pt_range_config is None
+        else (float(pt_range_config[0]), float(pt_range_config[1]))
+    )
+
     _logger.info(f"{criterion=}")
     _logger.info(f"{aux_terms=}")
+    _logger.info(f"{pt_weighting=}")
+    _logger.info(f"pt_range={pt_range}")
+    if pt_weighting is not None:
+        _logger.info(
+            f"pT bin weights (negatives): "
+            f"{[round(each, 3) for each in pt_weighting.weight_negative.tolist()]}"
+        )
+        _logger.info(
+            f"pT bin weights (positives): "
+            f"{[round(each, 3) for each in pt_weighting.weight_positive.tolist()]}"
+        )
 
     # ---------------------------------------------------------------------------
     # Optimization
@@ -776,6 +984,8 @@ def run(
     # ---------------------------------------------------------------------------
     ckpt_dir = run_dir / "checkpoints"
 
+    # NOTE: selecting on validation loss is not comparable across runs whose
+    # criterion or loss weighting differs; select on the operating-point metric.
     model_checkpoint = ModelCheckpoint(
         object_dict={
             "model": model,
@@ -783,9 +993,13 @@ def run(
             "lr_scheduler": lr_scheduler,
             "global_state": global_state,
         },
-        metric="loss",
-        mode="min",
+        metric=config.eval.monitor.metric,
+        mode=config.eval.monitor.mode,
         output_dir=ckpt_dir,
+    )
+    _logger.info(
+        f"Selecting the best checkpoint on validation "
+        f"'{config.eval.monitor.metric}' ({config.eval.monitor.mode})."
     )
 
     # ---------------------------------------------------------------------------
@@ -807,6 +1021,8 @@ def run(
                     model=td_model,
                     criterion=criterion,
                     aux_terms=aux_terms,
+                    pt_weighting=pt_weighting,
+                    pt_range=pt_range,
                     data_loader=train_loader,
                     optimizer=optimizer,
                     lr_scheduler=lr_scheduler,

@@ -1,0 +1,21 @@
+# Selected focal configuration (docs/study/loss.md) plus pT-balanced weighting.
+#
+# Counters the sample's rising P(signal | pT): the flat-pT muon gun makes 83% of
+# 50-100 GeV tracks signal, so a model scores well by learning the pT prior and
+# background rejection collapses there. See docs/study/high-pt.md.
+#
+# alpha is the sweep knob. alpha=0 is bit-identical to loss=focal.
+pos_weight: 100
+
+criterion:
+  _target_: muonly.nn.BinaryFocalLoss
+  gamma: 3.0
+  reduction: none
+
+pt_weight:
+  # 0 = off, 1 = every pT bin carries the same total weight within its class
+  alpha: 0.5
+  # loose enough to leave alpha=1 unclamped on this sample (needs ~560)
+  max_ratio: 1000.0
+  # optional JSON cache of the train-set class/pT counts, shared across a sweep
+  counts_file: null

@@ -1,3 +1,5 @@
+from collections.abc import Sequence
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -9,6 +11,7 @@ __all__ = [
     "AsymmetricFocalLoss",
     "SoftMinPositiveMarginLoss",
     "TopKPairwiseRankingLoss",
+    "PtBinWeighting",
 ]
 
 
@@ -122,6 +125,127 @@ class AsymmetricFocalLoss(nn.Module):
         return (
             f"gamma_pos={self.gamma_pos}, gamma_neg={self.gamma_neg}, "
             f"clip={self.clip}, reduction={self.reduction}"
+        )
+
+
+class PtBinWeighting(nn.Module):
+    r"""Per-track loss weight that flattens the pT spectrum within each class.
+
+    The training sample is a flat-pT muon gun on top of a steeply falling
+    pileup spectrum, so :math:`P(\text{signal} \mid p_T)` climbs from 0.026 in
+    the lowest bin to 0.833 above 50 GeV. A model can score well by learning
+    that prior, which collapses background rejection exactly where the prior is
+    strongest. Tracks above 20 GeV are 0.06% of all negatives and receive
+    ~0.01% of the loss weight, so there is almost no gradient pressure against
+    it.
+
+    For a track of class :math:`c` in pT bin :math:`b`, with train-set counts
+    :math:`N_c(b)`:
+
+    .. math::
+
+        \tilde w(b) = N_c(b)^{-\alpha}, \qquad
+        w_c(b) = \frac{N_c\, \tilde w(b)}{\sum_{b'} N_c(b')\, \tilde w(b')}
+
+    followed by a clamp to ``[1/max_ratio, max_ratio]`` and a renormalization.
+    The weights therefore average to 1 over the training set, which preserves
+    the loss scale and the effective ``pos_weight``.
+
+    ``alpha=0`` gives all-ones weights and is bit-identical to no weighting.
+    ``alpha=1`` gives every pT bin the same total weight within its class.
+
+    ``max_ratio`` bounds the variance, at the cost of making ``alpha`` a less
+    faithful knob: on the current sample full flattening needs a factor ~560 on
+    the 50-100 GeV negatives, so a limit of 100 would saturate every setting
+    above ``alpha=0.75`` and collapse the top of a sweep. The default is
+    therefore loose enough to leave ``alpha=1`` unclamped; lower it
+    deliberately when the concern is overfitting the few tens of thousands of
+    unique high-pT background tracks.
+    """
+
+    def __init__(
+        self,
+        pt_edges: Sequence[float],
+        count_positive: Sequence[float] | Tensor,
+        count_negative: Sequence[float] | Tensor,
+        alpha: float = 0.5,
+        max_ratio: float = 1000.0,
+    ) -> None:
+        super().__init__()
+        if alpha < 0:
+            raise ValueError("alpha must be non-negative.")
+        if max_ratio < 1:
+            raise ValueError("max_ratio must be at least 1.")
+
+        edges = torch.as_tensor(list(pt_edges), dtype=torch.float64)
+        if edges.ndim != 1 or edges.numel() < 2:
+            raise ValueError("pt_edges must be a 1-D sequence of at least 2 edges.")
+        if not bool((edges[1:] > edges[:-1]).all()):
+            raise ValueError("pt_edges must be strictly increasing.")
+        num_bins = edges.numel() - 1
+
+        counts = {}
+        for name, value in [
+            ("count_positive", count_positive),
+            ("count_negative", count_negative),
+        ]:
+            tensor = torch.as_tensor(list(value), dtype=torch.float64)
+            if tensor.shape != (num_bins,):
+                raise ValueError(
+                    f"{name} must have one entry per pT bin "
+                    f"({num_bins}), got {tuple(tensor.shape)}."
+                )
+            if bool((tensor < 0).any()):
+                raise ValueError(f"{name} must be non-negative.")
+            counts[name] = tensor
+
+        self.alpha = alpha
+        self.max_ratio = max_ratio
+        self.num_bins = num_bins
+
+        self.register_buffer("pt_boundaries", edges[1:-1].contiguous().float())
+        self.register_buffer(
+            "weight_positive",
+            self._bin_weights(counts["count_positive"], alpha, max_ratio),
+        )
+        self.register_buffer(
+            "weight_negative",
+            self._bin_weights(counts["count_negative"], alpha, max_ratio),
+        )
+
+    @staticmethod
+    def _bin_weights(counts: Tensor, alpha: float, max_ratio: float) -> Tensor:
+        occupied = counts > 0
+        weights = torch.zeros_like(counts)
+        if not bool(occupied.any()):
+            return weights.float()
+
+        weights[occupied] = counts[occupied] ** (-alpha)
+
+        def normalize(values: Tensor) -> Tensor:
+            total = (counts * values).sum()
+            if total <= 0:
+                return values
+            return values * counts.sum() / total
+
+        weights = normalize(weights)
+        weights[occupied] = weights[occupied].clamp(1.0 / max_ratio, max_ratio)
+        # the clamp perturbs the mean; restore it so the loss scale is unchanged
+        weights = normalize(weights)
+        return weights.float()
+
+    def forward(self, target: Tensor, pt: Tensor) -> Tensor:
+        indices = torch.bucketize(pt.contiguous(), self.pt_boundaries, right=True)
+        return torch.where(
+            target > 0.5,
+            self.weight_positive[indices],
+            self.weight_negative[indices],
+        )
+
+    def extra_repr(self) -> str:
+        return (
+            f"alpha={self.alpha}, max_ratio={self.max_ratio}, "
+            f"num_bins={self.num_bins}"
         )
 
 

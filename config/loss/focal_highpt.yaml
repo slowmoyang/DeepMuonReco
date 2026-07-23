@@ -1,0 +1,19 @@
+# Ceiling experiment: high-pT specialist (docs/study/high-pt.md, Phase 2).
+#
+# Restricts the *loss support* to pT >= 10 GeV. Model inputs are unchanged --
+# every track still enters the network and the event context is identical, only
+# the tracks the loss is computed on change. This removes the exposure problem
+# entirely rather than rebalancing it, and so measures what the architecture can
+# learn about high-pT tracks when the low-pT bulk is not competing for gradient.
+#
+# Compare against the baseline on within-bin ranking (per-bin ROC AUC and TNR at
+# a per-bin efficiency target), never at the global threshold: a specialist has
+# no low-pT calibration, so a single global operating point is meaningless.
+pos_weight: 100
+
+criterion:
+  _target_: muonly.nn.BinaryFocalLoss
+  gamma: 3.0
+  reduction: none
+
+pt_range: [10.0, .inf]

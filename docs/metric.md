@@ -94,6 +94,36 @@ different transverse-momentum regions are useful diagnostics, but their TNR
 values generally correspond to different thresholds and do not describe the
 performance of a single global operating point.
 
+## Secondary Metric: `tnr_macro_pt`
+
+The headline TNR is an average over negatives, and 99.9% of the negatives sit
+below 20 GeV. It is therefore almost blind to the high-pT region, where
+rejection is worst — a model can lose or gain everything above 20 GeV without
+moving `tnr_at_tpr_0p9999` by a measurable amount.
+
+`PtBinnedOperatingPoint` (`muonly.nn.metrics`) reports, at the **same single
+global threshold** the headline metric returns, the TNR of each pT bin and
+their unweighted mean, `tnr_macro_pt`. Because every bin counts equally
+regardless of population, the sparse high-pT bins become visible.
+
+- The pT binning comes from `config/eval/default.yaml` and is shared with the
+  pT-balanced loss weighting and the evaluation tables.
+- The metric keeps the bounded-memory histogram design described above; its
+  state is `(n_pt_bins, 2, 100_001)` and is fixed by the binning, not by the
+  number of evaluated tracks.
+- The per-bin rates are **not** independently optimized thresholds. They
+  describe the differential behaviour of one global cut, which is what the
+  production configuration will actually apply.
+
+`tnr_macro_pt` is a secondary metric. `tnr_at_tpr_0p9999` remains the primary
+model-selection criterion and the guardrail: a change that improves
+`tnr_macro_pt` while degrading the global TNR has traded away rejection in the
+bins that carry the reconstruction cost. Report both.
+
+Best-checkpoint selection is configured by `eval.monitor` and defaults to
+`tnr_at_tpr_0p9999` (max). Selecting on validation loss is not valid across
+runs whose criterion or loss weighting differs.
+
 ## Evaluation Procedure
 
 Use the metric as follows:

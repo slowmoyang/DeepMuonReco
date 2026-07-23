@@ -6,6 +6,7 @@ defaults:
   - data_load: default
   - optim: default
   - loss: focal
+  - eval: default
   - paths: khu
   - torch: default
   - hydra: default

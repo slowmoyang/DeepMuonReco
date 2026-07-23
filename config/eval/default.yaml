@@ -1,0 +1,19 @@
+# Differential (pT-binned) evaluation settings.
+#
+# ``pt_edges`` is the single source of truth for the pT binning: it is shared by
+# the validation ``PtBinnedOperatingPoint`` metric, the pT-balanced loss
+# weighting (``loss.pt_weight``), and the final per-bin evaluation tables.
+# Bins are left-closed; tracks above the last finite edge fall in the overflow
+# bin. See docs/metric.md.
+pt_edges: [0, 1, 2, 3, 4, 5, 7, 10, 15, 20, 30, 50, 100, .inf]
+
+# Minimum signal efficiency defining the operating point of the differential
+# metric. Matches the ``tnr_at_tpr_0p9999`` headline metric.
+min_sensitivity: 0.9999
+
+# Validation metric used for best-checkpoint selection. Selecting on ``loss``
+# is not valid across runs whose loss is reweighted or uses a different
+# criterion (docs/loss.md, "Validation semantics").
+monitor:
+  metric: tnr_at_tpr_0p9999
+  mode: max

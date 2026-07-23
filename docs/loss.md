@@ -39,6 +39,13 @@ aux:                    # optional list of batch-level auxiliary terms
     margin: 2.0
     k: 16
     weight: 0.1
+
+pt_weight:              # optional per-track pT rebalancing; absent = off
+  alpha: 0.5
+  max_ratio: 1000.0
+  counts_file: null
+
+pt_range: [10.0, .inf]  # optional restriction of the loss support; absent = all
 ```
 
 - `pos_weight` is resolved first (dataset scan when `auto`) and injected into
@@ -62,6 +69,8 @@ Available configs:
 | `loss=asymmetric_focal`| `AsymmetricFocalLoss(2, 0, 0)`   | —                           |
 | `loss=focal_minpos`    | `BinaryFocalLoss(gamma=2)`       | `SoftMinPositiveMarginLoss` |
 | `loss=focal_rank`      | `BinaryFocalLoss(gamma=2)`       | `TopKPairwiseRankingLoss`   |
+| `loss=focal_ptbal`     | `BinaryFocalLoss(gamma=3)`       | — (adds `pt_weight`)        |
+| `loss=focal_highpt`    | `BinaryFocalLoss(gamma=3)`       | — (adds `pt_range`)         |
 
 Hyperparameter sweeps need no new files:
 
@@ -136,6 +145,47 @@ TNR@TPR≥99.9% is decided — hardest positives vs. hardest negatives — inste
 of the global ranking that AUROC-style losses optimize. Zero when either side
 is empty in the batch.
 
+## Differential loss shaping
+
+Both terms below act on the *pT spectrum* rather than on individual scores.
+They exist because the training sample is a flat-pT `SingleMu` gun on top of a
+steeply falling pileup spectrum, so $P(\text{signal} \mid p_T)$ rises from
+0.026 in the lowest bin to 0.833 above 50 GeV. A model can score well by
+learning that prior, which collapses background rejection exactly where the
+prior is strongest. See `docs/study/high-pt.md` for the measurement.
+
+Both use the pT binning from `config/eval/default.yaml`, shared with the
+validation metric and the evaluation tables.
+
+### `pt_weight` (`PtBinWeighting`)
+
+Per-track weight multiplied into the per-element criterion before averaging.
+For a track of class $c$ in bin $b$ with train-set counts $N_c(b)$:
+
+$$\tilde w(b) = N_c(b)^{-\alpha}, \qquad
+w_c(b) = \frac{N_c\,\tilde w(b)}{\sum_{b'} N_c(b')\,\tilde w(b')}$$
+
+then clamped to $[1/\texttt{max\_ratio}, \texttt{max\_ratio}]$ and
+renormalized. The weights average to 1 over the training set, so the loss scale
+and the effective `pos_weight` are unchanged.
+
+- `alpha: 0` gives all-ones weights and is **bit-identical** to omitting the
+  block; `alpha: 1` gives every pT bin the same total weight within its class.
+- `max_ratio` bounds the variance, but also makes `alpha` a less faithful knob:
+  full flattening needs a factor ~560 on the 50-100 GeV negatives, so a limit
+  of 100 saturates everything above `alpha=0.75`. The default is 1000.
+- `counts_file` caches the train-set class/pT counts as JSON so a sweep counts
+  once instead of once per run.
+
+### `pt_range`
+
+Restricts the **loss support** to tracks with `pt` in `[low, high)`. Model
+inputs are untouched: every track still enters the network and the event
+context is identical, only the tracks the loss is computed on change. Used for
+the high-pT specialist ceiling experiment. A run trained this way has no
+calibration outside the range, so compare it on within-bin ranking, never at a
+global threshold.
+
 ## Validation semantics
 
 `validate()` applies only the per-element base criterion (no aux terms), so
@@ -149,4 +199,5 @@ across different criteria** — compare runs on `tnr_at_tpr_0p9999`
 The former pT-binned loss balancing (`loss.balancing`, configs
 `loss=pt_0_3` / `loss=pt_bin`) was removed together with the hard-coded BCE
 criterion when this framework was introduced. Per-pT-bin *diagnostics* remain
-available through the validation loss metrics.
+available through the validation loss metrics. The `pt_weight` block above
+supersedes it with a count-driven, config-shared binning.
