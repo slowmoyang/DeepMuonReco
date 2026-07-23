@@ -1,7 +1,8 @@
 # Study: Can the Model Learn High-$p_T$ Tracker Tracks?
 
-Status: **Phase 1 complete — the ceiling gate passes; Phases 2 and 3 are
-justified and not yet run.**
+Status: **Phase 1 complete — the ceiling gate passes. Phase 2 was attempted
+but the specialist run collapsed and is inconclusive; Phase 3 has not been
+run.**
 
 ## Question
 
@@ -150,7 +151,7 @@ a learnability ceiling**:
 4. that prior is a property of the flat-$p_T$ gun, and the model applies it
    beyond 100 GeV where it is false.
 
-## Phase 2 — Ceiling experiment (not yet run)
+## Phase 2 — Ceiling experiment (aborted, inconclusive)
 
 One run. `loss=focal_highpt` restricts the loss support to $p_T \geq 10$ GeV.
 Model inputs are unchanged: every track still enters the network and the event
@@ -171,10 +172,25 @@ operating point is meaningless for it.
 - specialist ≈ baseline ⇒ the architecture or the inputs are the ceiling, and
   the answer is `docs/plan.md` P2/P3, not reweighting.
 
+The run at `logs/high-pt/phase2_specialist` was manually stopped during the
+epoch 349 validation, after epoch 348 had completed. Validation collapsed to an
+all-positive operating point: from epoch 107 onward,
+`tnr_at_tpr_0p9999`, `tnr_macro_pt`, and every per-bin TNR remained zero, and
+the operating threshold remained zero. Over the same period the validation
+loss diverged, reaching 26.70 at epoch 348.
+
+The only saved checkpoint is the global-TNR-selected checkpoint from epoch 6,
+with `tnr_at_tpr_0p9999 = 0.0016`. This is not a usable specialist result:
+the protocol above requires within-bin AUC and rejection at 99.9% per-bin
+efficiency, while checkpointing monitored the global 99.99% operating point
+that is explicitly meaningless for a specialist. No converged checkpoint is
+available for the intended comparison. **The attempt is therefore an
+optimization failure, not evidence for either side of the ceiling gate.**
+
 | Run | AUC 20–30 | AUC 30–50 | AUC 50–100 | rej@bin 99.9% >20 GeV | Aim hash |
 | --- | --- | --- | --- | --- | --- |
 | baseline | 0.8736 | 0.8456 | 0.8235 | 0.384 / 0.323 / 0.285 | — |
-| specialist | | | | | |
+| specialist | — | — | — | **aborted / inconclusive** | — |
 
 ## Phase 3 — $p_T$-balanced loss weighting (not yet run)
 
